@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
+#[cfg(test)]
+mod tests;
+
 fn main() {
     const FILE_PATH: &str = "../measurements.txt";
     let stats = process_file(FILE_PATH);
