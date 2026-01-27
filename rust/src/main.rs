@@ -1,13 +1,20 @@
 use std::collections::BTreeMap;
+use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 #[cfg(test)]
 mod tests;
+const DEFAULT_FILE_PATH: &str = "../measurements.txt";
 
 fn main() {
-    const FILE_PATH: &str = "../measurements.txt";
-    let stats = process_file(FILE_PATH);
+    let args: Vec<String> = env::args().collect();
+    let file_path = if args.len() > 1 {
+        args[1].as_str()
+    } else {
+        DEFAULT_FILE_PATH
+    };
+    let stats = process_file(file_path);
     let output = format_output(&stats);
     print!("{output}");
 }

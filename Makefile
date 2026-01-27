@@ -21,8 +21,9 @@ GO_BIN := $(GO_DIR)/$(BIN_NAME)
 RUST_DIR := rust
 RUST_BIN := $(RUST_DIR)/target/release/$(BIN_NAME)
 
-# Time command
-TIME := /usr/bin/time -f "Time: %E\nMemory: %M KB"
+# Get absolute path to measurements.txt
+ROOT_DIR := $(shell pwd)
+MEASUREMENTS_FILE := $(ROOT_DIR)/measurements.txt
 
 .PHONY: help
 help: ## Display this help.
@@ -40,11 +41,11 @@ gob: ## Build Go binary.
 
 .PHONY: go
 go: gob ## Run Go binary.
-	time ./$(GO_BIN)
+	time $(GO_BIN) $(MEASUREMENTS_FILE)
 
 .PHONY: go-time
 go-time: gob ## Run Go with detailed timing.
-	$(TIME) $(GO_BIN)
+	time $(GO_BIN) $(MEASUREMENTS_FILE)
 
 ##@ Rust
 
@@ -54,11 +55,11 @@ rustb: ## Build Rust binary (release).
 
 .PHONY: rust
 rust: rustb ## Run Rust binary.
-	time $(RUST_BIN)
+	time $(RUST_BIN) $(MEASUREMENTS_FILE)
 
 .PHONY: rust-time
 rust-time: rustb ## Run Rust with detailed timing.
-	$(TIME) $(RUST_BIN)
+	time $(RUST_BIN) $(MEASUREMENTS_FILE)
 
 ##@ Code Quality
 
@@ -101,16 +102,16 @@ test-all: test-go test-rust ## Run all tests.
 .PHONY: bench
 bench: rustb gob ## Build and benchmark both implementations.
 	@echo "=== Rust ==="
-	cd $(RUST_DIR)/target/release && time ./$(BIN_NAME) > /dev/null
+	time $(RUST_BIN) $(MEASUREMENTS_FILE) > /dev/null
 	@echo "\n=== Go ==="
-	cd $(GO_DIR) && time ./$(BIN_NAME) > /dev/null
+	time $(GO_BIN) $(MEASUREMENTS_FILE) > /dev/null
 
 .PHONY: compare
 compare: rustb gob ## Run both and compare output.
 	@echo "=== Rust Output (first 5 lines) ==="
-	cd $(RUST_DIR)/target/release && ./$(BIN_NAME) | head -5
+	$(RUST_BIN) $(MEASUREMENTS_FILE) | head -5
 	@echo "\n=== Go Output (first 5 lines) ==="
-	cd $(GO_DIR) && ./$(BIN_NAME) | head -5
+	$(GO_BIN) $(MEASUREMENTS_FILE) | head -5
 
 ##@ Cleanup
 

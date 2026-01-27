@@ -9,8 +9,14 @@ import (
 	"strings"
 )
 
+const defaultFilePath = "../measurements.txt"
+
 func main() {
-    const filePath = "../measurements.txt"
+	filePath := defaultFilePath
+	if len(os.Args) > 1 {
+		filePath = os.Args[1]
+	}
+
 	stats, err := processFile(filePath)
 	if err != nil {
 		panic(err)
