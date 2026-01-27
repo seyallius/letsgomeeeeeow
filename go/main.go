@@ -23,7 +23,7 @@ func main() {
 	}
 
 	output := formatOutput(stats)
-	fmt.Print(output)
+	fmt.Println(output)
 }
 
 // -------------------------------------------- Helper Functions --------------------------------------------

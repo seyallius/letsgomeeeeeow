@@ -16,7 +16,7 @@ fn main() {
     };
     let stats = process_file(file_path);
     let output = format_output(&stats);
-    print!("{output}");
+    println!("{output}");
 }
 
 // -------------------------------------------- Helper Functions --------------------------------------------
