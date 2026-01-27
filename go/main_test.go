@@ -44,9 +44,15 @@ func TestProcessLine_SingleEntry(t *testing.T) {
 func TestProcessLine_MultipleSameStation(t *testing.T) {
 	stats := make(map[string][]float64)
 
-	processLine("Hamburg;12.0", stats)
-	processLine("Hamburg;15.0", stats)
-	processLine("Hamburg;9.0", stats)
+	if err := processLine("Hamburg;12.0", stats); err != nil {
+	    t.Errorf("failed processing line: %v", err);
+	}
+	if err := processLine("Hamburg;15.0", stats); err != nil {
+        t.Errorf("failed processing line: %v", err);
+    }
+	if err := processLine("Hamburg;9.0", stats); err != nil {
+        t.Errorf("failed processing line: %v", err);
+    }
 
 	if len(stats) != 1 {
 		t.Errorf("Expected 1 station, got %d", len(stats))
@@ -71,9 +77,15 @@ func TestProcessLine_MultipleSameStation(t *testing.T) {
 func TestProcessLine_MultipleStations(t *testing.T) {
 	stats := make(map[string][]float64)
 
-	processLine("Hamburg;12.0", stats)
-	processLine("Berlin;20.0", stats)
-	processLine("Hamburg;8.0", stats)
+	if err := processLine("Hamburg;12.0", stats); err != nil {
+        t.Errorf("failed processing line: %v", err);
+    }
+	if err := processLine("Berlin;20.0", stats); err != nil {
+        t.Errorf("failed processing line: %v", err);
+    }
+	if err := processLine("Hamburg;8.0", stats); err != nil {
+        t.Errorf("failed processing line: %v", err);
+    }
 
 	if len(stats) != 2 {
 		t.Errorf("Expected 2 stations, got %d", len(stats))
@@ -112,9 +124,15 @@ func TestProcessLine_MultipleStations(t *testing.T) {
 func TestProcessLine_NegativeTemperatures(t *testing.T) {
 	stats := make(map[string][]float64)
 
-	processLine("Oslo;-5.0", stats)
-	processLine("Oslo;-10.0", stats)
-	processLine("Oslo;-2.0", stats)
+	if err := processLine("Oslo;-5.0", stats); err != nil {
+	    t.Errorf("failed processing line: %v", err);
+	}
+	if err := processLine("Oslo;-10.0", stats); err != nil {
+	    t.Errorf("failed processing line: %v", err);
+	}
+	if err := processLine("Oslo;-2.0", stats); err != nil {
+	    t.Errorf("failed processing line: %v", err);
+	}
 
 	tup := stats["Oslo"]
 	if !approxEqual(tup[0], -10.0) {

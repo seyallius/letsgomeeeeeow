@@ -71,17 +71,21 @@ fmt-go: ## Format Go code.
 fmt-rust: ## Format Rust code.
 	cd $(RUST_DIR) && cargo fmt
 
+.PHONY: vet-go
+vet-go: ## Run Go vet.
+	cd $(GO_DIR) && go vet ./...
+
 .PHONY: check-rust
 check-rust: ## Check Rust code without building.
 	cd $(RUST_DIR) && cargo check
 
 .PHONY: clippy
-clippy: ## Run Rust clippy linter.
+clippy: ## Run Rust linter.
 	cd $(RUST_DIR) && cargo clippy
 
-.PHONY: vet-go
-vet-go: ## Run Go vet.
-	cd $(GO_DIR) && go vet ./...
+.PHONY: golangci-lint
+golangci-lint: ## Run Go linter.
+	cd $(GO_DIR) && golangci-lint run
 
 ##@ Testing
 

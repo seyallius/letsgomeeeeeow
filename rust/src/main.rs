@@ -23,7 +23,8 @@ fn main() {
 
 /// Processes a file and returns the statistics for all stations.
 fn process_file(file_path: &str) -> BTreeMap<String, (f64, f64, usize, f64)> {
-    let file = File::open(file_path).expect(&format!("Could not open {} file", file_path));
+    let file =
+        File::open(file_path).unwrap_or_else(|_| panic!("Could not open {} file", file_path));
     let file = BufReader::new(file);
 
     let mut stats = BTreeMap::<String, (f64, f64, usize, f64)>::new();
