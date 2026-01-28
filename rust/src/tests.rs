@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -6,7 +7,7 @@ use tempfile::NamedTempFile;
 
 #[test]
 fn test_process_line_single_entry() {
-    let mut stats = BTreeMap::new();
+    let mut stats = HashMap::new();
     process_line("Hamburg;12.0", &mut stats);
 
     assert_eq!(stats.len(), 1);
@@ -21,7 +22,7 @@ fn test_process_line_single_entry() {
 
 #[test]
 fn test_process_line_multiple_same_station() {
-    let mut stats = BTreeMap::new();
+    let mut stats = HashMap::new();
     process_line("Hamburg;12.0", &mut stats);
     process_line("Hamburg;15.0", &mut stats);
     process_line("Hamburg;9.0", &mut stats);
@@ -37,7 +38,7 @@ fn test_process_line_multiple_same_station() {
 
 #[test]
 fn test_process_line_multiple_stations() {
-    let mut stats = BTreeMap::new();
+    let mut stats = HashMap::new();
     process_line("Hamburg;12.0", &mut stats);
     process_line("Berlin;20.0", &mut stats);
     process_line("Hamburg;8.0", &mut stats);
@@ -61,7 +62,7 @@ fn test_process_line_multiple_stations() {
 
 #[test]
 fn test_process_line_negative_temperatures() {
-    let mut stats = BTreeMap::new();
+    let mut stats = HashMap::new();
     process_line("Oslo;-5.0", &mut stats);
     process_line("Oslo;-10.0", &mut stats);
     process_line("Oslo;-2.0", &mut stats);
@@ -75,7 +76,7 @@ fn test_process_line_negative_temperatures() {
 
 #[test]
 fn test_format_output_single_station() {
-    let mut stats = BTreeMap::new();
+    let mut stats = HashMap::new();
     stats.insert("Hamburg".to_string(), (9.0, 36.0, 3, 15.0));
 
     let output = format_output(&stats);
@@ -84,13 +85,13 @@ fn test_format_output_single_station() {
 
 #[test]
 fn test_format_output_multiple_stations_alphabetical() {
-    let mut stats = BTreeMap::new();
+    let mut stats = HashMap::new();
     stats.insert("Hamburg".to_string(), (5.0, 30.0, 3, 15.0));
     stats.insert("Berlin".to_string(), (10.0, 45.0, 3, 20.0));
     stats.insert("Copenhagen".to_string(), (0.0, 15.0, 3, 10.0));
 
     let output = format_output(&stats);
-    // BTreeMap automatically sorts keys alphabetically
+    // BTreeMap in format_output automatically sorts keys alphabetically
     assert_eq!(
         output,
         "{Berlin=10.0/15.0/20.0, Copenhagen=0.0/5.0/10.0, Hamburg=5.0/10.0/15.0}"
@@ -99,7 +100,7 @@ fn test_format_output_multiple_stations_alphabetical() {
 
 #[test]
 fn test_format_output_decimal_precision() {
-    let mut stats = BTreeMap::new();
+    let mut stats = HashMap::new();
     // sum=76.6, count=3, mean should be 25.5 (rounded to 1 decimal)
     stats.insert("Tokyo".to_string(), (24.8, 76.6, 3, 26.3));
 
@@ -109,7 +110,7 @@ fn test_format_output_decimal_precision() {
 
 #[test]
 fn test_format_output_empty() {
-    let stats = BTreeMap::new();
+    let stats = HashMap::new();
     let output = format_output(&stats);
     assert_eq!(output, "{}");
 }
