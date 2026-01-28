@@ -3,5 +3,10 @@ name = "letsgomeeeeeow"
 version = "0.1.0"
 edition = "2024"
 
+[profile.release]
+lto = "fat"             # better linking optimization - better inlining across std and our crate (tf?)
+panic = "abort"
+debug = true
+
 [dependencies]
 tempfile = "3.24.0"

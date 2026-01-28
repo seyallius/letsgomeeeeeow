@@ -1,0 +1,2 @@
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-Ctarget-cpu=native"] # build binaries specific to my cpu's architecture only
