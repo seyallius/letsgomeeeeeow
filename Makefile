@@ -28,25 +28,6 @@ TIME := /usr/bin/time -f "Real: %e sec\nUser: %U sec\nSys: %S sec\nMemory: %M KB
 ROOT_DIR := $(shell pwd)
 MEASUREMENTS_FILE := $(ROOT_DIR)/measurements.txt
 
-# Shell script for formatting time output
-define TIME_FORMATTER
-seconds=$$1; \
-if [ -z "$$seconds" ]; then exit 1; fi; \
-minutes=$$(echo "$$seconds / 60" | bc); \
-secs=$$(echo "$$seconds % 60" | bc); \
-formatted_minutes=$$(printf "%02d" $$minutes); \
-formatted_secs=$$(printf "%05.2f" $$secs); \
-echo "$${formatted_minutes}:$${formatted_secs} min ($${seconds} sec)"
-endef
-
-# Shell script for formatting memory output
-define MEM_FORMATTER
-kb=$$1; \
-if [ -z "$$kb" ]; then exit 1; fi; \
-mb=$$(echo "scale=2; $$kb / 1024" | bc); \
-echo "$${mb} MB ($${kb} KB)"
-endef
-
 .PHONY: help
 help: ## Display this help.
 	@awk ' \
@@ -83,22 +64,16 @@ gob: ## Build Go binary.
 go: gob ## Run Go binary.
 	$(TIME) $(GO_BIN) $(MEASUREMENTS_FILE)
 
-.PHONY: go-time
-go-time: gob ## Run Go with detailed timing.
-	$(TIME) $(GO_BIN) $(MEASUREMENTS_FILE)
-
 ##@ Rust
 
 .PHONY: rustb
 rustb: ## Build Rust binary (release).
-	cd $(RUST_DIR) && cargo build --release
+	cd $(RUST_DIR) && \
+	RUSTFLAGS="-C force-frame-pointers=yes" && \
+	cargo build --release # makes stack traces much more accurate
 
 .PHONY: rust
 rust: rustb ## Run Rust binary.
-	$(TIME) $(RUST_BIN) $(MEASUREMENTS_FILE)
-
-.PHONY: rust-time
-rust-time: rustb ## Run Rust with detailed timing.
 	$(TIME) $(RUST_BIN) $(MEASUREMENTS_FILE)
 
 ##@ Code Quality
@@ -234,15 +209,6 @@ cmpr: rustb gob ## Performance comparison with formatted timing.
 			} \
 		'
 
-.PHONY: cmpr-simple
-cmpr-simple: rustb gob ## Performance comparison with simple timing.
-	@echo "=== Rust Performance ==="
-	@$(TIME) \
-		$(RUST_BIN) $(MEASUREMENTS_FILE) > /dev/null
-	@echo "\n=== Go Performance ==="
-	@$(TIME) \
-		$(GO_BIN) $(MEASUREMENTS_FILE) > /dev/null
-
 .PHONY: cmpr-hyperfine
 cmpr-hyperfine: rustb gob ## Run both and compare (hyperfine benchmark).
 	@echo "=== Hyperfine Benchmark (5 runs) ==="
@@ -251,6 +217,24 @@ cmpr-hyperfine: rustb gob ## Run both and compare (hyperfine benchmark).
 		"$(GO_BIN) $(MEASUREMENTS_FILE)" \
 		--export-markdown benchmark_results.md
 	@cat benchmark_results.md
+
+.PHONY: perf-record-rust
+perf-record-rust: rustb ## Record Rust CPU profile with perf (DWARF call graph).
+	@perf record --call-graph dwarf -- \
+    $(RUST_BIN) $(MEASUREMENTS_FILE)
+
+.PHONY: perf-record-go
+perf-record-go: gob ## Record Go CPU profile with perf (DWARF call graph).
+	@perf record --call-graph dwarf -- \
+	$(GO_BIN) $(MEASUREMENTS_FILE)
+
+.PHONY: perf-report
+perf-report: ## View last perf recording (interactive).
+	@perf report -g
+
+.PHONY: perf-flamegraph
+perf-flamegraph: ## Generate flamegraph from perf.data.
+	@perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg
 
 ##@ Cleanup
 

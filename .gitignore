@@ -22,3 +22,5 @@ target
 measurements*.txt
 letsgomeeeeeow*
 benchmark_results*.md
+perf.data
+flamegraph.svg
