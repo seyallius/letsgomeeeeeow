@@ -16,7 +16,7 @@ fn main() {
         DEFAULT_FILE_PATH
     };
     let stats = process_file(file_path);
-    let output = format_output(&stats);
+    let output = format_output(stats);
     println!("{output}");
     println!();
 }
@@ -24,25 +24,33 @@ fn main() {
 // -------------------------------------------- Helper Functions --------------------------------------------
 
 /// Processes a file and returns the statistics for all stations.
-fn process_file(file_path: &str) -> HashMap<String, (f64, f64, usize, f64)> {
+fn process_file(file_path: &str) -> HashMap<Vec<u8>, (f64, f64, usize, f64)> {
     let file =
         File::open(file_path).unwrap_or_else(|_| panic!("Could not open {} file", file_path));
     let file = BufReader::new(file);
 
-    let mut stats = HashMap::<String, (f64, f64, usize, f64)>::new();
+    let mut stats = HashMap::<Vec<u8>, (f64, f64, usize, f64)>::new();
 
-    for line in file.lines() {
-        let line = line.expect("Could not read line from file");
-        process_line(&line, &mut stats);
+    for line in file.split(b'\n') {
+        let line = line.unwrap();
+        let mut fields = line.rsplitn(2, |char| *char == b';');
+        let temperature = fields
+            .next()
+            .expect("failed to extract temperature from split-ted fields");
+        let station = fields
+            .next()
+            .expect("failed to extract station from split-ted fields");
+        process_line((station, temperature), &mut stats);
     }
 
     stats
 }
 
 /// Processes a single line and updates the stats map.
-fn process_line(line: &str, stats: &mut HashMap<String, (f64, f64, usize, f64)>) {
-    let (station, temperature) = line.split_once(';').expect("Could not parse line");
-    let temperature = temperature
+fn process_line(line: (&[u8], &[u8]), stats: &mut HashMap<Vec<u8>, (f64, f64, usize, f64)>) {
+    let (station, temperature) = line; // avoid utf-8 parsing except for temperature
+    // SAFETY: 1BRC README.md promised valid utf-8 string characters
+    let temperature = unsafe { str::from_utf8_unchecked(temperature) }
         .parse::<f64>()
         .expect("Could not parse temperature");
 
@@ -50,7 +58,7 @@ fn process_line(line: &str, stats: &mut HashMap<String, (f64, f64, usize, f64)>)
     let entry = match stats.get_mut(station) {
         Some(existing_stats) => existing_stats,
         None => stats
-            .entry(station.to_string())
+            .entry(station.to_vec())
             .or_insert((f64::MAX, 0_f64, 0usize, f64::MIN)),
     };
 
@@ -62,13 +70,18 @@ fn process_line(line: &str, stats: &mut HashMap<String, (f64, f64, usize, f64)>)
 }
 
 /// Formats the statistics into the required output format.
-fn format_output(stats: &HashMap<String, (f64, f64, usize, f64)>) -> String {
+fn format_output(stats: HashMap<Vec<u8>, (f64, f64, usize, f64)>) -> String {
     // We can;
     // a) sort all the keys,
     // b) move them into BTreeMap
     // we'll go with a
     let mut output = String::from("{");
-    let stats = BTreeMap::from_iter(stats);
+    let stats = BTreeMap::from_iter(
+        stats
+            .into_iter()
+            // SAFETY: 1BRC README.md promised valid utf-8 string characters
+            .map(|(k, v)| (unsafe { String::from_utf8_unchecked(k) }, v)),
+    );
     let mut stats = stats.iter().peekable();
 
     while let Some((station, (min, sum, count, max))) = stats.next() {
