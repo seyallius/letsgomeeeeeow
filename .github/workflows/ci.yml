@@ -20,6 +20,7 @@ jobs:
         with:
           go-version: stable
           cache: true
+          cache-dependency-path: go/go.sum
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -40,6 +41,7 @@ jobs:
         with:
           go-version: stable
           cache: true
+          cache-dependency-path: go/go.sum
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -76,6 +78,7 @@ jobs:
         with:
           go-version: stable
           cache: true
+          cache-dependency-path: go/go.sum
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
