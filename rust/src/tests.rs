@@ -6,6 +6,94 @@ use tempfile::NamedTempFile;
 // -------------------------------------------- Unit Tests --------------------------------------------
 
 #[test]
+fn test_mmap_file_small_content() {
+    // Test with small content
+    let content = b"Hello, mmap!";
+    let mut file = NamedTempFile::new().expect("Failed to create temp file");
+    file.write_all(content)
+        .expect("Failed to write to temp file");
+    file.flush().expect("Failed to flush");
+
+    let mmap = mmap_file(&file.as_file());
+
+    assert_eq!(mmap.len(), content.len());
+    assert_eq!(mmap, content);
+}
+
+#[test]
+fn test_mmap_file_unicode_content() {
+    // Test with Unicode (still valid UTF-8)
+    let content = "Hamburg;12.5\n北京;-3.7\n東京;25.0\n".as_bytes();
+    let mut file = NamedTempFile::new().expect("Failed to create temp file");
+    file.write_all(content)
+        .expect("Failed to write to temp file");
+    file.flush().expect("Failed to flush");
+
+    let mmap = mmap_file(&file.as_file());
+
+    assert_eq!(mmap.len(), content.len());
+    assert_eq!(mmap, content);
+}
+
+#[test]
+fn test_process_file_with_mmap_integration() {
+    // Integration test that specifically uses mmap
+    let data = "A;1.0\nB;2.0\nC;3.0\n";
+    let mut file = NamedTempFile::new().expect("Failed to create temp file");
+    file.write_all(data.as_bytes())
+        .expect("Failed to write to temp file");
+    let file_path = file.path().to_str().unwrap();
+
+    let stats = process_file(file_path);
+
+    assert_eq!(stats.len(), 3);
+    assert!(stats.contains_key("A".as_bytes()));
+    assert!(stats.contains_key("B".as_bytes()));
+    assert!(stats.contains_key("C".as_bytes()));
+}
+
+#[test]
+fn test_mmap_file_large_content() {
+    // Test with larger content (multiple pages)
+    let content: Vec<u8> = (0..10000).map(|i| (i % 256) as u8).collect();
+    let mut file = NamedTempFile::new().expect("Failed to create temp file");
+    file.write_all(&content)
+        .expect("Failed to write to temp file");
+    file.flush().expect("Failed to flush");
+
+    let mmap = mmap_file(&file.as_file());
+
+    assert_eq!(mmap.len(), content.len());
+    // Check first, middle, and last bytes
+    assert_eq!(mmap[0], content[0]);
+    assert_eq!(mmap[5000], content[5000]);
+    assert_eq!(mmap[9999], content[9999]);
+}
+
+// Test line splitting behavior with mmap
+#[test]
+fn test_line_parsing_with_mmap_data() {
+    let file = create_test_file("Station1;10.5\nStation2;-3.2\n\nStation3;0.0\n");
+
+    let mmap = mmap_file(&file.as_file());
+    let lines: Vec<&[u8]> = mmap.split(|&byte| byte == b'\n').collect();
+
+    // The data "Station1;10.5\nStation2;-3.2\n\nStation3;0.0\n" splits into:
+    // 1. "Station1;10.5"
+    // 2. "Station2;-3.2"
+    // 3. "" (empty line)
+    // 4. "Station3;0.0"
+    // 5. "" (trailing newline)
+    assert_eq!(lines.len(), 5);
+    assert_eq!(lines[0], b"Station1;10.5");
+    assert_eq!(lines[1], b"Station2;-3.2");
+    assert_eq!(lines[2], b""); // Empty line
+    assert_eq!(lines[3], b"Station3;0.0");
+    assert_eq!(lines[3], b"Station3;0.0");
+    assert_eq!(lines[4], b""); // Trailing newline creates empty segment
+}
+
+#[test]
 fn test_process_line_single_entry() {
     let mut stats = HashMap::new();
     process_line(parse_input_to_tuple("Hamburg;12.0"), &mut stats);

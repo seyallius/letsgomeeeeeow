@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
-use std::env;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::os::fd::AsRawFd;
+use std::{env, io, ptr, slice};
 
 #[cfg(test)]
 mod tests;
@@ -27,12 +27,18 @@ fn main() {
 fn process_file(file_path: &str) -> HashMap<Vec<u8>, (f64, f64, usize, f64)> {
     let file =
         File::open(file_path).unwrap_or_else(|_| panic!("Could not open {} file", file_path));
-    let file = BufReader::new(file);
 
     let mut stats = HashMap::<Vec<u8>, (f64, f64, usize, f64)>::new();
 
-    for line in file.split(b'\n') {
-        let line = line.unwrap();
+    //note: We know we're going to read the whole file, so buffered reading isn't optimal.
+    // Memory mapping tells the kernel to make the file accessible as memory.
+    let mmap = mmap_file(&file);
+
+    for line in mmap.split(|char| *char == b'\n') {
+        if line.is_empty() {
+            break;
+        }
+
         let mut fields = line.rsplitn(2, |char| *char == b';');
         let temperature = fields
             .next()
@@ -43,7 +49,71 @@ fn process_file(file_path: &str) -> HashMap<Vec<u8>, (f64, f64, usize, f64)> {
         process_line((station, temperature), &mut stats);
     }
 
+    // mmap is automatically unmapped when it goes out of scope (see mmap_file docs)
     stats
+}
+
+/// Memory-map a file into read-only byte slice using `libc::mmap`.
+///
+/// This function creates a read-only memory mapping of the entire file,
+/// allowing direct byte access without copying data into userspace buffers.
+/// The mapping is backed by the file on disk and shares memory with other
+/// processes mapping the same file (`MAP_SHARED`).
+///
+/// # Performance Characteristics
+/// - **Zero-copy**: Data is accessed directly from kernel page cache
+/// - **Lazy loading**: Pages are loaded on-demand (demand paging)
+/// - **Efficient random access**: Constant-time O(1) access to any byte offset
+/// - **Kernel-managed caching**: OS handles page cache automatically
+///
+/// # Safety
+/// - The returned slice is valid while the mapping exists i.e., until the file is closed.
+/// - **IMPORTANT**: The slice lifetime is tied to the underlying mapping,
+///   not the `File` parameter. This function's signature is misleading.
+/// - The caller must ensure the file is not mutated while mapped (undefined behavior)
+/// - The mapping is automatically unmapped when the slice goes out of scope
+///   (via the OS when process exits, but Rust doesn't track this lifetime)
+///
+/// # Panics
+/// - If file metadata cannot be read
+/// - If `mmap` system call fails (e.g., insufficient memory, invalid file descriptor)
+///
+/// A byte slice (`&[u8]`) referencing the memory-mapped file contents.
+/// **WARNING**: The actual lifetime is not encoded in Rust's type system.
+fn mmap_file(file: &File) -> &[u8] {
+    let len = file.metadata().expect("Could not read metadata").len();
+
+    // SAFETY: libc usage
+    unsafe {
+        const OFFSET: libc::off_t = 0;
+        let ptr = libc::mmap(
+            ptr::null_mut(),     // Let OS choose address (you don't care where)
+            len as libc::size_t, // Len of file - How many bytes to map
+            libc::PROT_READ,     // Memory protection: read-only
+            libc::MAP_SHARED,    // Changes visible to other processes & persisted to file
+            file.as_raw_fd(),    // File descriptor to map
+            OFFSET, // Offset of where we want to read from - Start mapping from beginning of file
+        );
+
+        if ptr == libc::MAP_FAILED {
+            panic!(
+                "failed to map file to mmap: {:?}",
+                io::Error::last_os_error()
+            )
+        }
+
+        //note: advise os on how this memory map will be accessed.
+        // We're telling the kernel that when we read from a byte
+        // offset, we're going to be reading in a sequential order,
+        // so feel free to read ahead more (huge ass more) in advance.
+        if libc::madvise(ptr, len as usize, libc::MADV_SEQUENTIAL) != 0 {
+            panic!()
+        }
+
+        let data = ptr as *const u8;
+        let number_of_elements = len as usize;
+        slice::from_raw_parts(data, number_of_elements)
+    }
 }
 
 /// Processes a single line and updates the stats map.

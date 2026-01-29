@@ -28,6 +28,59 @@ TIME := /usr/bin/time -f "Real: %e sec\nUser: %U sec\nSys: %S sec\nMemory: %M KB
 ROOT_DIR := $(shell pwd)
 MEASUREMENTS_FILE := $(ROOT_DIR)/measurements.txt
 
+# Define reusable function for formatting memory with dynamic unit scaling
+define format_memory
+	awk ' \
+		function format_memory(kb) { \
+			if (kb >= 1024*1024) { \
+				return sprintf("%.2f GB (%.0f MB, %.0f KB)", kb/(1024*1024), kb/1024, kb); \
+			} else if (kb >= 1024) { \
+				return sprintf("%.2f MB (%.0f KB)", kb/1024, kb); \
+			} else { \
+				return sprintf("%.0f KB", kb); \
+			} \
+		} \
+		/Real: .* sec/ { \
+			split($$2, arr, " "); \
+			sec = arr[1]; \
+			if (sec >= 60) { \
+				min = int(sec/60); \
+				rem = sec - min*60; \
+				printf "Real: %d min %05.2f sec (%.2f sec total)\n", min, rem, sec; \
+			} else { \
+				printf "Real: %.2f sec\n", sec; \
+			} \
+		} \
+		/User: .* sec/ { \
+			split($$2, arr, " "); \
+			sec = arr[1]; \
+			if (sec >= 60) { \
+				min = int(sec/60); \
+				rem = sec - min*60; \
+				printf "User: %d min %05.2f sec (%.2f sec total)\n", min, rem, sec; \
+			} else { \
+				printf "User: %.2f sec\n", sec; \
+			} \
+		} \
+		/Sys: .* sec/ { \
+			split($$2, arr, " "); \
+			sec = arr[1]; \
+			if (sec >= 60) { \
+				min = int(sec/60); \
+				rem = sec - min*60; \
+				printf "Sys: %d min %05.2f sec (%.2f sec total)\n", min, rem, sec; \
+			} else { \
+				printf "Sys: %.2f sec\n", sec; \
+			} \
+		} \
+		/Memory: .* KB/ { \
+			split($$2, arr, " "); \
+			kb = arr[1]; \
+			printf "Memory: %s\n", format_memory(kb); \
+		} \
+	'
+endef
+
 .PHONY: help
 help: ## Display this help.
 	@awk ' \
@@ -123,91 +176,11 @@ cmpr: rustb gob ## Performance comparison with formatted timing.
 	@echo "=== Rust Performance ==="
 	@$(TIME) \
 		$(RUST_BIN) $(MEASUREMENTS_FILE) 2>&1 >/dev/null | \
-		awk ' \
-			/Real: .* sec/ { \
-				split($$2, arr, " "); \
-				sec = arr[1]; \
-				if (sec >= 60) { \
-					min = int(sec/60); \
-					rem = sec - min*60; \
-					printf "Real: %d min %05.2f sec (%.2f sec total)\n", min, rem, sec; \
-				} else { \
-					printf "Real: %.2f sec\n", sec; \
-				} \
-			} \
-			/User: .* sec/ { \
-				split($$2, arr, " "); \
-				sec = arr[1]; \
-				if (sec >= 60) { \
-					min = int(sec/60); \
-					rem = sec - min*60; \
-					printf "User: %d min %05.2f sec (%.2f sec total)\n", min, rem, sec; \
-				} else { \
-					printf "User: %.2f sec\n", sec; \
-				} \
-			} \
-			/Sys: .* sec/ { \
-				split($$2, arr, " "); \
-				sec = arr[1]; \
-				if (sec >= 60) { \
-					min = int(sec/60); \
-					rem = sec - min*60; \
-					printf "Sys: %d min %05.2f sec (%.2f sec total)\n", min, rem, sec; \
-				} else { \
-					printf "Sys: %.2f sec\n", sec; \
-				} \
-			} \
-			/Memory: .* KB/ { \
-				split($$2, arr, " "); \
-				kb = arr[1]; \
-				mb = kb/1024; \
-				printf "Memory: %.2f MB (%d KB)\n", mb, kb; \
-			} \
-		'
+		$(format_memory)
 	@echo "\n=== Go Performance ==="
 	@$(TIME) \
 		$(GO_BIN) $(MEASUREMENTS_FILE) 2>&1 >/dev/null | \
-		awk ' \
-			/Real: .* sec/ { \
-				split($$2, arr, " "); \
-				sec = arr[1]; \
-				if (sec >= 60) { \
-					min = int(sec/60); \
-					rem = sec - min*60; \
-					printf "Real: %d min %05.2f sec (%.2f sec total)\n", min, rem, sec; \
-				} else { \
-					printf "Real: %.2f sec\n", sec; \
-				} \
-			} \
-			/User: .* sec/ { \
-				split($$2, arr, " "); \
-				sec = arr[1]; \
-				if (sec >= 60) { \
-					min = int(sec/60); \
-					rem = sec - min*60; \
-					printf "User: %d min %05.2f sec (%.2f sec total)\n", min, rem, sec; \
-				} else { \
-					printf "User: %.2f sec\n", sec; \
-				} \
-			} \
-			/Sys: .* sec/ { \
-				split($$2, arr, " "); \
-				sec = arr[1]; \
-				if (sec >= 60) { \
-					min = int(sec/60); \
-					rem = sec - min*60; \
-					printf "Sys: %d min %05.2f sec (%.2f sec total)\n", min, rem, sec; \
-				} else { \
-					printf "Sys: %.2f sec\n", sec; \
-				} \
-			} \
-			/Memory: .* KB/ { \
-				split($$2, arr, " "); \
-				kb = arr[1]; \
-				mb = kb/1024; \
-				printf "Memory: %.2f MB (%d KB)\n", mb, kb; \
-			} \
-		'
+		$(format_memory)
 
 .PHONY: cmpr-hyperfine
 cmpr-hyperfine: rustb gob ## Run both and compare (hyperfine benchmark).
