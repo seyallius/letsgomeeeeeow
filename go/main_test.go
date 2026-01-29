@@ -1,16 +1,92 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"os"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // -------------------------------------------- Unit Tests --------------------------------------------
 
+// TestMMapFile_SmallContent tests memory mapping with small content.
+func TestMMapFile_SmallContent(t *testing.T) {
+	// Test with small content
+	content := "Hello, mmap!"
+	file := createTestFile(t, content)
+	defer cleanupTestFile(t, file)
+
+	mmap := mmapFile(file)
+
+	require.Equal(t, len(mmap), len(content))
+	require.Equal(t, content, string(mmap))
+}
+
+// TestMMapFile_UnicodeContent tests memory mapping with Unicode content.
+func TestMMapFile_UnicodeContent(t *testing.T) {
+	// Test with Unicode (still valid UTF-8)
+	content := "Hamburg;12.5\n北京;-3.7\n東京;25.0\n"
+	file := createTestFile(t, content)
+	defer cleanupTestFile(t, file)
+
+	mmap := mmapFile(file)
+	require.Equal(t, len(mmap), len(content))
+	require.Equal(t, content, string(mmap))
+}
+
+// TestMMapFile_LargeContent tests memory mapping with large content.
+func TestMMapFile_LargeContent(t *testing.T) {
+	// Test with larger content (multiple pages)
+	var content string
+	for i := 0; i < 10_000; i++ {
+		content += fmt.Sprintf("%d", i%256)
+	}
+	file := createTestFile(t, content)
+	defer cleanupTestFile(t, file)
+
+	mmap := mmapFile(file)
+	require.Equal(t, len(mmap), len(content))
+	require.Equal(t, content, string(mmap))
+	// Check first, middle, and last bytes
+	require.Equal(t, mmap[0], content[0])
+	require.Equal(t, mmap[5000], content[5000])
+	require.Equal(t, mmap[9999], content[9999])
+}
+
+// TestMMapFile_LineParsingWithMMapData tests line parsing with mmap data.
+func TestMMapFile_LineParsingWithMMapData(t *testing.T) {
+	file := createTestFile(t, "Station1;10.5\nStation2;-3.2\n\nStation3;0.0\n")
+	defer cleanupTestFile(t, file)
+
+	mmap := mmapFile(file)
+	lines := strings.Split(string(mmap), "\n")
+
+	// The data "Station1;10.5\nStation2;-3.2\n\nStation3;0.0\n" splits into:
+	// 1. "Station1;10.5"
+	// 2. "Station2;-3.2"
+	// 3. "" (empty line)
+	// 4. "Station3;0.0"
+	// 5. "" (trailing newline)
+
+	expected := []string{
+		"Station1;10.5",
+		"Station2;-3.2",
+		"", // Empty line
+		"Station3;0.0",
+		"", // Trailing newline creates empty segment
+	}
+
+	for i, s := range expected {
+		require.Equal(t, s, lines[i])
+	}
+}
+
 // TestProcessLine_SingleEntry tests processing a single line with one station.
 func TestProcessLine_SingleEntry(t *testing.T) {
-	stats := make(map[string][]float64)
+	stats := make(map[string][4]float64)
 	err := processLine("Hamburg;12.0", stats)
 
 	if err != nil {
@@ -42,17 +118,17 @@ func TestProcessLine_SingleEntry(t *testing.T) {
 
 // TestProcessLine_MultipleSameStation tests processing multiple lines for the same station.
 func TestProcessLine_MultipleSameStation(t *testing.T) {
-	stats := make(map[string][]float64)
+	stats := make(map[string][4]float64)
 
 	if err := processLine("Hamburg;12.0", stats); err != nil {
-	    t.Errorf("failed processing line: %v", err);
+		t.Errorf("failed processing line: %v", err)
 	}
 	if err := processLine("Hamburg;15.0", stats); err != nil {
-        t.Errorf("failed processing line: %v", err);
-    }
+		t.Errorf("failed processing line: %v", err)
+	}
 	if err := processLine("Hamburg;9.0", stats); err != nil {
-        t.Errorf("failed processing line: %v", err);
-    }
+		t.Errorf("failed processing line: %v", err)
+	}
 
 	if len(stats) != 1 {
 		t.Errorf("Expected 1 station, got %d", len(stats))
@@ -75,17 +151,17 @@ func TestProcessLine_MultipleSameStation(t *testing.T) {
 
 // TestProcessLine_MultipleStations tests processing multiple different stations.
 func TestProcessLine_MultipleStations(t *testing.T) {
-	stats := make(map[string][]float64)
+	stats := make(map[string][4]float64)
 
 	if err := processLine("Hamburg;12.0", stats); err != nil {
-        t.Errorf("failed processing line: %v", err);
-    }
+		t.Errorf("failed processing line: %v", err)
+	}
 	if err := processLine("Berlin;20.0", stats); err != nil {
-        t.Errorf("failed processing line: %v", err);
-    }
+		t.Errorf("failed processing line: %v", err)
+	}
 	if err := processLine("Hamburg;8.0", stats); err != nil {
-        t.Errorf("failed processing line: %v", err);
-    }
+		t.Errorf("failed processing line: %v", err)
+	}
 
 	if len(stats) != 2 {
 		t.Errorf("Expected 2 stations, got %d", len(stats))
@@ -122,16 +198,16 @@ func TestProcessLine_MultipleStations(t *testing.T) {
 
 // TestProcessLine_NegativeTemperatures tests processing negative temperature values.
 func TestProcessLine_NegativeTemperatures(t *testing.T) {
-	stats := make(map[string][]float64)
+	stats := make(map[string][4]float64)
 
 	if err := processLine("Oslo;-5.0", stats); err != nil {
-	    t.Errorf("failed processing line: %v", err);
+		t.Errorf("failed processing line: %v", err)
 	}
 	if err := processLine("Oslo;-10.0", stats); err != nil {
-	    t.Errorf("failed processing line: %v", err);
+		t.Errorf("failed processing line: %v", err)
 	}
 	if err := processLine("Oslo;-2.0", stats); err != nil {
-	    t.Errorf("failed processing line: %v", err);
+		t.Errorf("failed processing line: %v", err)
 	}
 
 	tup := stats["Oslo"]
@@ -151,7 +227,7 @@ func TestProcessLine_NegativeTemperatures(t *testing.T) {
 
 // TestFormatOutput_SingleStation tests formatting output for a single station.
 func TestFormatOutput_SingleStation(t *testing.T) {
-	stats := map[string][]float64{
+	stats := map[string][4]float64{
 		"Hamburg": {9.0, 36.0, 3.0, 15.0},
 	}
 
@@ -165,7 +241,7 @@ func TestFormatOutput_SingleStation(t *testing.T) {
 
 // TestFormatOutput_MultipleStationsAlphabetical tests alphabetical ordering in output.
 func TestFormatOutput_MultipleStationsAlphabetical(t *testing.T) {
-	stats := map[string][]float64{
+	stats := map[string][4]float64{
 		"Hamburg":    {5.0, 30.0, 3.0, 15.0},
 		"Berlin":     {10.0, 45.0, 3.0, 20.0},
 		"Copenhagen": {0.0, 15.0, 3.0, 10.0},
@@ -181,7 +257,7 @@ func TestFormatOutput_MultipleStationsAlphabetical(t *testing.T) {
 
 // TestFormatOutput_DecimalPrecision tests decimal precision in output formatting.
 func TestFormatOutput_DecimalPrecision(t *testing.T) {
-	stats := map[string][]float64{
+	stats := map[string][4]float64{
 		"Tokyo": {24.8, 76.6, 3.0, 26.3}, // mean = 25.533... rounds to 25.5
 	}
 
@@ -195,7 +271,7 @@ func TestFormatOutput_DecimalPrecision(t *testing.T) {
 
 // TestFormatOutput_Empty tests formatting an empty stats map.
 func TestFormatOutput_Empty(t *testing.T) {
-	stats := make(map[string][]float64)
+	stats := make(map[string][4]float64)
 
 	output := formatOutput(stats)
 	expected := "{}"
@@ -251,6 +327,24 @@ func TestProcessFile_Integration(t *testing.T) {
 	if !approxEqual(berlin[3], 25.0) {
 		t.Errorf("Berlin max: expected 25.0, got %.1f", berlin[3])
 	}
+}
+
+// TestMMapFile_WithMMapIntegration tests the full file processing pipeline with mmap.
+func TestMMapFile_WithMMapIntegration(t *testing.T) {
+	// Integration test that specifically uses mmap
+	data := "A;1.0\nB;2.0\nC;3.0\n"
+	file := createTestFile(t, data)
+	defer cleanupTestFile(t, file)
+
+	filePath := file.Name()
+
+	stats, err := processFile(filePath)
+	require.NoError(t, err)
+
+	require.Equal(t, len(stats), 3)
+	require.Contains(t, stats, "A")
+	require.Contains(t, stats, "B")
+	require.Contains(t, stats, "C")
 }
 
 // TestFullPipeline tests the complete pipeline from file to formatted output.

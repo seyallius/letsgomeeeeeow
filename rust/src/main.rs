@@ -107,7 +107,10 @@ fn mmap_file(file: &File) -> &[u8] {
         // offset, we're going to be reading in a sequential order,
         // so feel free to read ahead more (huge ass more) in advance.
         if libc::madvise(ptr, len as usize, libc::MADV_SEQUENTIAL) != 0 {
-            panic!()
+            panic!(
+                "failed to advise os on how this memory map will be accessed: {:?}",
+                io::Error::last_os_error()
+            )
         }
 
         let data = ptr as *const u8;

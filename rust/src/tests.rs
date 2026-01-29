@@ -36,26 +36,9 @@ fn test_mmap_file_unicode_content() {
 }
 
 #[test]
-fn test_process_file_with_mmap_integration() {
-    // Integration test that specifically uses mmap
-    let data = "A;1.0\nB;2.0\nC;3.0\n";
-    let mut file = NamedTempFile::new().expect("Failed to create temp file");
-    file.write_all(data.as_bytes())
-        .expect("Failed to write to temp file");
-    let file_path = file.path().to_str().unwrap();
-
-    let stats = process_file(file_path);
-
-    assert_eq!(stats.len(), 3);
-    assert!(stats.contains_key("A".as_bytes()));
-    assert!(stats.contains_key("B".as_bytes()));
-    assert!(stats.contains_key("C".as_bytes()));
-}
-
-#[test]
 fn test_mmap_file_large_content() {
     // Test with larger content (multiple pages)
-    let content: Vec<u8> = (0..10000).map(|i| (i % 256) as u8).collect();
+    let content: Vec<u8> = (0..10_000).map(|i| (i % 256) as u8).collect();
     let mut file = NamedTempFile::new().expect("Failed to create temp file");
     file.write_all(&content)
         .expect("Failed to write to temp file");
@@ -228,6 +211,23 @@ fn test_process_file_integration() {
     assert!(approx_eq(*sum, 45.0));
     assert_eq!(*count, 2);
     assert!(approx_eq(*max, 25.0));
+}
+
+#[test]
+fn test_process_file_with_mmap_integration() {
+    // Integration test that specifically uses mmap
+    let data = "A;1.0\nB;2.0\nC;3.0\n";
+    let mut file = NamedTempFile::new().expect("Failed to create temp file");
+    file.write_all(data.as_bytes())
+        .expect("Failed to write to temp file");
+    let file_path = file.path().to_str().unwrap();
+
+    let stats = process_file(file_path);
+
+    assert_eq!(stats.len(), 3);
+    assert!(stats.contains_key("A".as_bytes()));
+    assert!(stats.contains_key("B".as_bytes()));
+    assert!(stats.contains_key("C".as_bytes()));
 }
 
 #[test]
