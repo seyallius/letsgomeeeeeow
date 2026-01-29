@@ -411,8 +411,11 @@ func createTestFile(t *testing.T, data string) *os.File {
 func cleanupTestFile(t *testing.T, file *os.File) {
 	t.Helper()
 	name := file.Name()
-	file.Close()
-	os.Remove(name)
+	err := file.Close()
+	require.NoError(t, err)
+
+	err = os.Remove(name)
+	require.NoError(t, err)
 }
 
 // approxEqual checks if two float64 values are approximately equal (within 0.1).
