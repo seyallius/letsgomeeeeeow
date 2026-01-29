@@ -149,7 +149,7 @@ check-rust: ## Check Rust code without building.
 
 .PHONY: clippy
 clippy: ## Run Rust linter.
-	cd $(RUST_DIR) && cargo clippy
+	cd $(RUST_DIR) && cargo clippy -- -D warnings
 
 .PHONY: golangci-lint
 golangci-lint: ## Run Go linter.
