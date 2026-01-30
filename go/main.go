@@ -25,6 +25,7 @@ func main() {
 
 	output := formatOutput(stats)
 	fmt.Println(output)
+	fmt.Println()
 }
 
 // -------------------------------------------- Helper Functions --------------------------------------------

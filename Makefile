@@ -1,15 +1,4 @@
-##@ General
-
-# The help target prints out all targets with their descriptions organized
-# beneath their categories. The categories are represented by '##@' and the
-# target descriptions by '##'. The awk commands is responsible for reading the
-# entire set of makefiles included in this invocation, looking for lines of the
-# file as xyz: ## something, and then pretty-format the target and help. Then,
-# if there's a line with ##@ something, that gets pretty-printed as a category.
-# More info on the usage of ANSI control characters for terminal formatting:
-# https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_parameters
-# More info on the awk command:
-# http://linuxcommand.org/lc3_adv_awk.php
+SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
 
@@ -28,7 +17,7 @@ TIME := /usr/bin/time -f "Real: %e sec\nUser: %U sec\nSys: %S sec\nMemory: %M KB
 ROOT_DIR := $(shell pwd)
 MEASUREMENTS_FILE := $(ROOT_DIR)/measurements.txt
 
-# Define reusable function for formatting memory with dynamic unit scaling
+# Format memory with dynamic unit scaling.
 define format_memory
 	awk ' \
 		function format_memory(kb) { \
@@ -81,6 +70,24 @@ define format_memory
 	'
 endef
 
+# Run a command with time.
+define run_with_time
+	$(TIME) $(1) 2> >( $(format_memory) )
+endef
+
+##@ General
+
+# The help target prints out all targets with their descriptions organized
+# beneath their categories. The categories are represented by '##@' and the
+# target descriptions by '##'. The awk commands is responsible for reading the
+# entire set of makefiles included in this invocation, looking for lines of the
+# file as xyz: ## something, and then pretty-format the target and help. Then,
+# if there's a line with ##@ something, that gets pretty-printed as a category.
+# More info on the usage of ANSI control characters for terminal formatting:
+# https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_parameters
+# More info on the awk command:
+# http://linuxcommand.org/lc3_adv_awk.php
+
 .PHONY: help
 help: ## Display this help.
 	@awk ' \
@@ -115,7 +122,7 @@ gob: ## Build Go binary.
 
 .PHONY: go
 go: gob ## Run Go binary.
-	$(TIME) $(GO_BIN) $(MEASUREMENTS_FILE)
+	@$(call run_with_time, $(GO_BIN) $(MEASUREMENTS_FILE))
 
 ##@ Rust
 
@@ -127,7 +134,7 @@ rustb: ## Build Rust binary (release).
 
 .PHONY: rust
 rust: rustb ## Run Rust binary.
-	$(TIME) $(RUST_BIN) $(MEASUREMENTS_FILE)
+	@$(call run_with_time, $(RUST_BIN) $(MEASUREMENTS_FILE))
 
 ##@ Code Quality
 
@@ -177,7 +184,8 @@ cmpr: rustb gob ## Performance comparison with formatted timing.
 	@$(TIME) \
 		$(RUST_BIN) $(MEASUREMENTS_FILE) 2>&1 >/dev/null | \
 		$(format_memory)
-	@echo "\n=== Go Performance ==="
+	@echo ""
+	@echo "=== Go Performance ==="
 	@$(TIME) \
 		$(GO_BIN) $(MEASUREMENTS_FILE) 2>&1 >/dev/null | \
 		$(format_memory)
