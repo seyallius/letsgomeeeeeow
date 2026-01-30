@@ -1,2 +1,5 @@
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-Ctarget-cpu=native"] # build binaries specific to my cpu's architecture only
+rustflags = [
+    "-Ctarget-cpu=native", # build binaries specific to my cpu's architecture only
+    "-Cforce-frame-pointers=yes" # makes stack frames not have any gaps
+]

@@ -147,8 +147,8 @@ fn test_process_line_negative_temperatures() {
 
 #[test]
 fn test_format_output_single_station() {
-    let mut stats = HashMap::<Vec<u8>, (f64, f64, usize, f64)>::new();
-    stats.insert("Hamburg".as_bytes().to_vec(), (9.0, 36.0, 3, 15.0));
+    let mut stats = HashMap::<&[u8], (f64, f64, usize, f64)>::new();
+    stats.insert("Hamburg".as_bytes(), (9.0, 36.0, 3, 15.0));
 
     let output = format_output(stats);
     assert_eq!(output, "{Hamburg=9.0/12.0/15.0}");
@@ -156,10 +156,10 @@ fn test_format_output_single_station() {
 
 #[test]
 fn test_format_output_multiple_stations_alphabetical() {
-    let mut stats = HashMap::<Vec<u8>, (f64, f64, usize, f64)>::new();
-    stats.insert("Hamburg".as_bytes().to_vec(), (5.0, 30.0, 3, 15.0));
-    stats.insert("Berlin".as_bytes().to_vec(), (10.0, 45.0, 3, 20.0));
-    stats.insert("Copenhagen".as_bytes().to_vec(), (0.0, 15.0, 3, 10.0));
+    let mut stats = HashMap::<&[u8], (f64, f64, usize, f64)>::new();
+    stats.insert("Hamburg".as_bytes(), (5.0, 30.0, 3, 15.0));
+    stats.insert("Berlin".as_bytes(), (10.0, 45.0, 3, 20.0));
+    stats.insert("Copenhagen".as_bytes(), (0.0, 15.0, 3, 10.0));
 
     let output = format_output(stats);
     // BTreeMap in format_output automatically sorts keys alphabetically
@@ -171,9 +171,9 @@ fn test_format_output_multiple_stations_alphabetical() {
 
 #[test]
 fn test_format_output_decimal_precision() {
-    let mut stats = HashMap::<Vec<u8>, (f64, f64, usize, f64)>::new();
+    let mut stats = HashMap::<&[u8], (f64, f64, usize, f64)>::new();
     // sum=76.6, count=3, mean should be 25.5 (rounded to 1 decimal)
-    stats.insert("Tokyo".as_bytes().to_vec(), (24.8, 76.6, 3, 26.3));
+    stats.insert("Tokyo".as_bytes(), (24.8, 76.6, 3, 26.3));
 
     let output = format_output(stats);
     assert_eq!(output, "{Tokyo=24.8/25.5/26.3}");
@@ -192,21 +192,20 @@ fn test_format_output_empty() {
 fn test_process_file_integration() {
     let data = "Hamburg;12.0\nBerlin;20.0\nHamburg;8.0\nBerlin;25.0\n";
     let file = create_test_file(data);
-    let file_path = file.path().to_str().unwrap();
 
-    let stats = process_file(file_path);
+    let stats = process_file(file.as_file());
 
-    assert_eq!(stats.len(), 2);
+    assert_eq!(stats.statistics.len(), 2);
 
     // Hamburg: min=8.0, sum=20.0, count=2, max=12.0, mean=10.0
-    let (min, sum, count, max) = stats.get("Hamburg".as_bytes()).unwrap();
+    let (min, sum, count, max) = stats.statistics.get("Hamburg".as_bytes()).unwrap();
     assert!(approx_eq(*min, 8.0));
     assert!(approx_eq(*sum, 20.0));
     assert_eq!(*count, 2);
     assert!(approx_eq(*max, 12.0));
 
     // Berlin: min=20.0, sum=45.0, count=2, max=25.0, mean=22.5
-    let (min, sum, count, max) = stats.get("Berlin".as_bytes()).unwrap();
+    let (min, sum, count, max) = stats.statistics.get("Berlin".as_bytes()).unwrap();
     assert!(approx_eq(*min, 20.0));
     assert!(approx_eq(*sum, 45.0));
     assert_eq!(*count, 2);
@@ -220,24 +219,22 @@ fn test_process_file_with_mmap_integration() {
     let mut file = NamedTempFile::new().expect("Failed to create temp file");
     file.write_all(data.as_bytes())
         .expect("Failed to write to temp file");
-    let file_path = file.path().to_str().unwrap();
 
-    let stats = process_file(file_path);
+    let stats = process_file(file.as_file());
 
-    assert_eq!(stats.len(), 3);
-    assert!(stats.contains_key("A".as_bytes()));
-    assert!(stats.contains_key("B".as_bytes()));
-    assert!(stats.contains_key("C".as_bytes()));
+    assert_eq!(stats.statistics.len(), 3);
+    assert!(stats.statistics.contains_key("A".as_bytes()));
+    assert!(stats.statistics.contains_key("B".as_bytes()));
+    assert!(stats.statistics.contains_key("C".as_bytes()));
 }
 
 #[test]
 fn test_full_pipeline() {
     let data = "Hamburg;12.0\nBerlin;20.0\nHamburg;8.0\nBerlin;25.0\n";
     let file = create_test_file(data);
-    let file_path = file.path().to_str().unwrap();
 
-    let stats = process_file(file_path);
-    let output = format_output(stats);
+    let stats = process_file(file.as_file());
+    let output = format_output(stats.statistics);
 
     assert_eq!(output, "{Berlin=20.0/22.5/25.0, Hamburg=8.0/10.0/12.0}");
 }
@@ -246,10 +243,9 @@ fn test_full_pipeline() {
 fn test_full_pipeline_with_negatives() {
     let data = "Oslo;-5.0\nOslo;-10.0\nOslo;-2.0\n";
     let file = create_test_file(data);
-    let file_path = file.path().to_str().unwrap();
 
-    let stats = process_file(file_path);
-    let output = format_output(stats);
+    let stats = process_file(file.as_file());
+    let output = format_output(stats.statistics);
 
     // mean = -17.0 / 3 = -5.666... rounds to -5.7
     assert_eq!(output, "{Oslo=-10.0/-5.7/-2.0}");

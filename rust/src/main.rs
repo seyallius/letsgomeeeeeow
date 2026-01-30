@@ -6,7 +6,39 @@ use std::{env, io, ptr, slice};
 #[cfg(test)]
 mod tests;
 
+// -------------------------------------------- Types, Variables & Consts --------------------------------------------
+
 const DEFAULT_FILE_PATH: &str = "../measurements.txt";
+
+/// Holds station statistics together with the backing memory map.
+///
+/// # Why does this exist?
+/// The HashMap keys are `&[u8]` slices that point directly into a
+/// memory-mapped file. In Rust, references must never outlive the data
+/// they point to.
+///
+/// This struct ensures:
+/// - The memory map (`_mmap`) stays alive
+/// - All keys in `map` remain valid
+///
+/// # Performance
+/// - Zero allocations
+/// - Zero copying
+/// - Zero runtime cost
+///
+/// This is purely a *lifetime anchor* for soundness.
+struct Stats<'a> {
+    /// Memory-mapped file backing all station name slices.
+    ///
+    /// This field is intentionally unused. Its sole purpose is to
+    /// keep the mmap alive for as long as `map` exists.
+    _mmap: &'a [u8],
+
+    /// Station statistics keyed by station name slices.
+    statistics: HashMap<&'a [u8], (f64, f64, usize, f64)>,
+}
+
+// -------------------------------------------- Main --------------------------------------------
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -15,24 +47,45 @@ fn main() {
     } else {
         DEFAULT_FILE_PATH
     };
-    let stats = process_file(file_path);
-    let output = format_output(stats);
+    let file =
+        File::open(file_path).unwrap_or_else(|_| panic!("Could not open {} file", file_path));
+    let stats = process_file(&file);
+    let output = format_output(stats.statistics);
     println!("{output}");
     println!();
 }
 
 // -------------------------------------------- Helper Functions --------------------------------------------
 
-/// Processes a file and returns the statistics for all stations.
-fn process_file(file_path: &str) -> HashMap<Vec<u8>, (f64, f64, usize, f64)> {
-    let file =
-        File::open(file_path).unwrap_or_else(|_| panic!("Could not open {} file", file_path));
-
-    let mut stats = HashMap::<Vec<u8>, (f64, f64, usize, f64)>::new();
+/// Processes a file and returns aggregated statistics for all stations.
+///
+/// # Lifetimes
+/// The returned `Stats<'a>` borrows directly from a memory-mapped view
+/// of `file`. All station name keys inside the returned map are slices
+/// pointing into that mapping.
+///
+/// The lifetime `'_` ensures the memory map remains valid for as long
+/// as the statistics are used.
+///
+/// # Design Notes
+/// - Station names are kept as `&[u8]` to avoid UTF‑8 validation and
+///   allocation during parsing.
+///
+/// # Safety
+/// This function relies on `mmap_file`, whose signature does not encode
+/// the true lifetime of the mapping. Correctness is ensured by storing
+/// the returned slice inside `Stats`, preventing it from escaping.
+fn process_file(file: &File) -> Stats<'_> {
+    //note: The key is slice of u8 bytes as we already have the data in mmap,
+    // there isn't really needed to parse the keys into strings.
+    // ~Jon Gjengset:
+    //      because it can be references into the mmap,
+    //      there's nothing that needs to be owned about.
+    let mut stats = HashMap::<&[u8], (f64, f64, usize, f64)>::new();
 
     //note: We know we're going to read the whole file, so buffered reading isn't optimal.
     // Memory mapping tells the kernel to make the file accessible as memory.
-    let mmap = mmap_file(&file);
+    let mmap = mmap_file(file);
 
     for line in mmap.split(|char| *char == b'\n') {
         if line.is_empty() {
@@ -50,7 +103,10 @@ fn process_file(file_path: &str) -> HashMap<Vec<u8>, (f64, f64, usize, f64)> {
     }
 
     // mmap is automatically unmapped when it goes out of scope (see mmap_file docs)
-    stats
+    Stats {
+        _mmap: mmap,
+        statistics: stats,
+    }
 }
 
 /// Memory-map a file into read-only byte slice using `libc::mmap`.
@@ -66,20 +122,27 @@ fn process_file(file_path: &str) -> HashMap<Vec<u8>, (f64, f64, usize, f64)> {
 /// - **Efficient random access**: Constant-time O(1) access to any byte offset
 /// - **Kernel-managed caching**: OS handles page cache automatically
 ///
-/// # Safety
-/// - The returned slice is valid while the mapping exists i.e., until the file is closed.
-/// - **IMPORTANT**: The slice lifetime is tied to the underlying mapping,
-///   not the `File` parameter. This function's signature is misleading.
-/// - The caller must ensure the file is not mutated while mapped (undefined behavior)
-/// - The mapping is automatically unmapped when the slice goes out of scope
-///   (via the OS when process exits, but Rust doesn't track this lifetime)
+/// # Safety and Soundness
+/// ⚠️ **Important**: The returned `&[u8]` does *not* correctly encode
+/// the lifetime of the underlying mapping in Rust’s type system.
+///
+/// - The slice is valid for as long as the memory mapping exists
+/// - The mapping is *not* tied to the lifetime of `&File`
+/// - Rust cannot verify this relationship
+///
+/// Correct usage requires the caller to ensure:
+/// - The slice does not outlive the mapping
+/// - The file is not mutated while mapped
+///
+/// In this program, soundness is enforced by immediately storing the
+/// slice inside `Stats`, which acts as a lifetime anchor.
 ///
 /// # Panics
 /// - If file metadata cannot be read
 /// - If `mmap` system call fails (e.g., insufficient memory, invalid file descriptor)
 ///
+/// # Returns
 /// A byte slice (`&[u8]`) referencing the memory-mapped file contents.
-/// **WARNING**: The actual lifetime is not encoded in Rust's type system.
 fn mmap_file(file: &File) -> &[u8] {
     let len = file.metadata().expect("Could not read metadata").len();
 
@@ -120,7 +183,12 @@ fn mmap_file(file: &File) -> &[u8] {
 }
 
 /// Processes a single line and updates the stats map.
-fn process_line(line: (&[u8], &[u8]), stats: &mut HashMap<Vec<u8>, (f64, f64, usize, f64)>) {
+/// Lifetime specifiers are required because `HashMap` is **invariant**
+/// over its key type when mutably borrowed.
+fn process_line<'a>(
+    line: (&'a [u8], &'a [u8]),
+    stats: &mut HashMap<&'a [u8], (f64, f64, usize, f64)>,
+) {
     let (station, temperature) = line; // avoid utf-8 parsing except for temperature
     // SAFETY: 1BRC README.md promised valid utf-8 string characters
     let temperature = unsafe { str::from_utf8_unchecked(temperature) }
@@ -128,12 +196,9 @@ fn process_line(line: (&[u8], &[u8]), stats: &mut HashMap<Vec<u8>, (f64, f64, us
         .expect("Could not parse temperature");
 
     // Get or insert default value for the station
-    let entry = match stats.get_mut(station) {
-        Some(existing_stats) => existing_stats,
-        None => stats
-            .entry(station.to_vec())
-            .or_insert((f64::MAX, 0_f64, 0usize, f64::MIN)),
-    };
+    let entry = stats
+        .entry(station)
+        .or_insert((f64::MAX, 0_f64, 0usize, f64::MIN));
 
     // Update the min, sum, count, and max values for the station
     entry.0 = entry.0.min(temperature); // min
@@ -143,18 +208,18 @@ fn process_line(line: (&[u8], &[u8]), stats: &mut HashMap<Vec<u8>, (f64, f64, us
 }
 
 /// Formats the statistics into the required output format.
-fn format_output(stats: HashMap<Vec<u8>, (f64, f64, usize, f64)>) -> String {
+fn format_output(stats: HashMap<&[u8], (f64, f64, usize, f64)>) -> String {
     // We can;
     // a) sort all the keys,
     // b) move them into BTreeMap
     // we'll go with a
     let mut output = String::from("{");
-    let stats = BTreeMap::from_iter(
-        stats
-            .into_iter()
-            // SAFETY: 1BRC README.md promised valid utf-8 string characters
-            .map(|(k, v)| (unsafe { String::from_utf8_unchecked(k) }, v)),
-    );
+    let stats = BTreeMap::from_iter(stats.into_iter().map(|(k, v)| {
+        // SAFETY: 1BRC README.md promised valid utf-8 string characters
+        //note: the key is already a reference and thus, no need for it
+        // to be a String.
+        (unsafe { str::from_utf8_unchecked(k) }, v)
+    }));
     let mut stats = stats.iter().peekable();
 
     while let Some((station, (min, sum, count, max))) = stats.next() {
