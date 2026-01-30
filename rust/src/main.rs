@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::os::fd::AsRawFd;
-use std::{env, io, ptr, slice};
+use std::{env, io, os, ptr, slice};
 
 #[cfg(test)]
 mod tests;
@@ -23,7 +23,23 @@ fn main() {
 
 // -------------------------------------------- Helper Functions --------------------------------------------
 
-/// Processes a file and returns the statistics for all stations.
+/// Processes the input file and computes per-station statistics.
+///
+/// # Performance notes
+/// This function is optimized for large, sequential scans:
+///
+/// - The file is memory-mapped to avoid buffered I/O overhead.
+/// - Lines are located using `memchr`, which performs a raw byte search
+///   instead of iterator-based splitting.
+/// - Field separation avoids `split` and closures to reduce per-byte
+///   overhead in the hot loop.
+///
+/// The input format is assumed to be ASCII with lines of the form:
+/// `station_name;temperature\n`.
+///
+/// # Safety
+/// Uses `libc::memchr` on memory-mapped data. The pointers passed to
+/// `memchr` are guaranteed to be valid for the provided length.
 fn process_file(file_path: &str) -> HashMap<Vec<u8>, (i16, i64, usize, i16)> {
     let file =
         File::open(file_path).unwrap_or_else(|_| panic!("Could not open {} file", file_path));
@@ -31,12 +47,52 @@ fn process_file(file_path: &str) -> HashMap<Vec<u8>, (i16, i64, usize, i16)> {
     //TODO(key): maybe make the key &[u8], but measure since we'll be breaking MADV_SEQUENTIAL
     // See 44c7b658 for &[u8] key.
     let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16)>::new();
-
+    let mut at = 0;
     //note: We know we're going to read the whole file, so buffered reading isn't optimal.
     // Memory mapping tells the kernel to make the file accessible as memory.
     let mmap = mmap_file(&file);
 
-    for line in mmap.split(|char| *char == b'\n') {
+    loop {
+        let rest_mmap_data = &mmap[at..];
+        //note: memchr returns a pointer to where that char appears.
+        // ~cppreference website:
+        //      Pointer to the location of the byte, or a null pointer if no such byte is found.
+        // SAFETY: rest_mmap_data is valid for at lest rest_mmap_data.len() bytes.
+        let next_newline = unsafe {
+            libc::memchr(
+                rest_mmap_data.as_ptr() as *const os::raw::c_void,
+                b'\n' as os::raw::c_int,
+                rest_mmap_data.len(),
+            )
+        };
+        let line = if next_newline.is_null() {
+            //note: there's no need to remember to break on new line
+            // since next iteration will find empty line.
+            // We're basically saying:
+            // if we don't find \n character, line is from at -> EOF
+
+            rest_mmap_data
+        } else {
+            //note: Otherwise;
+            // - `next_newline` is a `*const c_void` pointer to where '\n' was found
+            // - `rest_mmap_data.as_ptr()` is pointer to start of our slice
+            // - `.offset_from()` returns the signed distance between two pointers (in bytes)
+            // - Since `next_newline` is always ≥ `rest_mmap_data.as_ptr()`, the result is positive
+            // - We cast to usize to get the length
+
+            let next_newline = next_newline as *const u8;
+
+            // SAFETY: memchr always returns pointer in rest_mmap_data, which are valid.
+            let len = unsafe { next_newline.offset_from(rest_mmap_data.as_ptr()) };
+
+            //note: ~Jon Gjengset:
+            //          we happen to know that next_newline is always greater than
+            //          the pointer we pass in and as such we know this is positive.
+            let len = len as usize;
+            &rest_mmap_data[..len]
+        };
+        at += line.len() + 1; //note: skipping over the line we found + newline
+
         if line.is_empty() {
             break;
         }
