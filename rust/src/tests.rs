@@ -85,10 +85,15 @@ fn test_process_line_single_entry() {
     assert!(stats.contains_key("Hamburg".as_bytes()));
 
     let (min, sum, count, max) = stats.get("Hamburg".as_bytes()).unwrap();
-    assert!(approx_eq(*min, 12.0));
-    assert!(approx_eq(*sum, 12.0));
+    assert!(approx_eq_i16(*min, 120));
+    assert!(approx_eq_i16(
+        (*sum)
+            .try_into()
+            .expect("should be able to convert sum to i64"),
+        120
+    ));
     assert_eq!(*count, 1);
-    assert!(approx_eq(*max, 12.0));
+    assert!(approx_eq_i16(*max, 120));
 }
 
 #[test]
@@ -101,10 +106,15 @@ fn test_process_line_multiple_same_station() {
     assert_eq!(stats.len(), 1);
 
     let (min, sum, count, max) = stats.get("Hamburg".as_bytes()).unwrap();
-    assert!(approx_eq(*min, 9.0));
-    assert!(approx_eq(*sum, 36.0)); // 12 + 15 + 9
+    assert!(approx_eq_i16(*min, 90)); // 9.0 * 10
+    assert!(approx_eq_i16(
+        (*sum)
+            .try_into()
+            .expect("should be able to convert sum to i64"),
+        360
+    )); // 12 + 15 + 9 = 36, *10 = 360
     assert_eq!(*count, 3);
-    assert!(approx_eq(*max, 15.0));
+    assert!(approx_eq_i16(*max, 150));
 }
 
 #[test]
@@ -119,16 +129,26 @@ fn test_process_line_multiple_stations() {
     assert!(stats.contains_key("Berlin".as_bytes()));
 
     let (min, sum, count, max) = stats.get("Hamburg".as_bytes()).unwrap();
-    assert!(approx_eq(*min, 8.0));
-    assert!(approx_eq(*sum, 20.0));
+    assert!(approx_eq_i16(*min, 80)); // 8.0 * 10
+    assert!(approx_eq_i16(
+        (*sum)
+            .try_into()
+            .expect("should be able to convert sum to i64"),
+        200
+    )); // 12.0 + 8.0 = 20.0, *10 = 200
     assert_eq!(*count, 2);
-    assert!(approx_eq(*max, 12.0));
+    assert!(approx_eq_i16(*max, 120));
 
     let (min, sum, count, max) = stats.get("Berlin".as_bytes()).unwrap();
-    assert!(approx_eq(*min, 20.0));
-    assert!(approx_eq(*sum, 20.0));
+    assert!(approx_eq_i16(*min, 200));
+    assert!(approx_eq_i16(
+        (*sum)
+            .try_into()
+            .expect("should be able to convert sum to i64"),
+        200
+    ));
     assert_eq!(*count, 1);
-    assert!(approx_eq(*max, 20.0));
+    assert!(approx_eq_i16(*max, 200));
 }
 
 #[test]
@@ -139,16 +159,47 @@ fn test_process_line_negative_temperatures() {
     process_line(parse_input_to_tuple("Oslo;-2.0"), &mut stats);
 
     let (min, sum, count, max) = stats.get("Oslo".as_bytes()).unwrap();
-    assert!(approx_eq(*min, -10.0));
-    assert!(approx_eq(*sum, -17.0));
+    assert!(approx_eq_i16(*min, -100)); // -10.0 * 10
+    assert!(approx_eq_i16(
+        (*sum)
+            .try_into()
+            .expect("should be able to convert sum to i64"),
+        -170
+    )); // -17.0 * 10
     assert_eq!(*count, 3);
-    assert!(approx_eq(*max, -2.0));
+    assert!(approx_eq_i16(*max, -20)); // -2.0 * 10
+}
+
+#[test]
+fn test_parse_temperature_positive_temperature() {
+    assert_eq!(parse_temperature(b"12.3"), 123);
+    assert_eq!(parse_temperature(b"0.1"), 1);
+    assert_eq!(parse_temperature(b"99.9"), 999);
+}
+
+#[test]
+fn test_parse_temperature_negative_temperature() {
+    assert_eq!(parse_temperature(b"-1.0"), -10);
+    assert_eq!(parse_temperature(b"-4.7"), -47);
+    assert_eq!(parse_temperature(b"-99.9"), -999);
+}
+
+#[test]
+fn test_parse_temperature_zero() {
+    assert_eq!(parse_temperature(b"0.0"), 0);
+    assert_eq!(parse_temperature(b"-0.0"), 0);
+}
+
+#[test]
+fn test_parse_temperature_single_digit_before_decimal() {
+    assert_eq!(parse_temperature(b"5.5"), 55);
+    assert_eq!(parse_temperature(b"-5.5"), -55);
 }
 
 #[test]
 fn test_format_output_single_station() {
-    let mut stats = HashMap::<Vec<u8>, (f64, f64, usize, f64)>::new();
-    stats.insert("Hamburg".as_bytes().to_vec(), (9.0, 36.0, 3, 15.0));
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16)>::new();
+    stats.insert("Hamburg".as_bytes().to_vec(), (90, 360, 3, 150)); // 9.0, 36.0, 15.0 in tenths
 
     let output = format_output(stats);
     assert_eq!(output, "{Hamburg=9.0/12.0/15.0}");
@@ -156,10 +207,10 @@ fn test_format_output_single_station() {
 
 #[test]
 fn test_format_output_multiple_stations_alphabetical() {
-    let mut stats = HashMap::<Vec<u8>, (f64, f64, usize, f64)>::new();
-    stats.insert("Hamburg".as_bytes().to_vec(), (5.0, 30.0, 3, 15.0));
-    stats.insert("Berlin".as_bytes().to_vec(), (10.0, 45.0, 3, 20.0));
-    stats.insert("Copenhagen".as_bytes().to_vec(), (0.0, 15.0, 3, 10.0));
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16)>::new();
+    stats.insert("Hamburg".as_bytes().to_vec(), (50, 300, 3, 150)); // 5.0, 30.0, 15.0 in tenths
+    stats.insert("Berlin".as_bytes().to_vec(), (100, 450, 3, 200)); // 10.0, 45.0, 20.0 in tenths
+    stats.insert("Copenhagen".as_bytes().to_vec(), (0, 150, 3, 100)); // 0.0, 15.0, 10.0 in tenths
 
     let output = format_output(stats);
     // BTreeMap in format_output automatically sorts keys alphabetically
@@ -171,9 +222,9 @@ fn test_format_output_multiple_stations_alphabetical() {
 
 #[test]
 fn test_format_output_decimal_precision() {
-    let mut stats = HashMap::<Vec<u8>, (f64, f64, usize, f64)>::new();
-    // sum=76.6, count=3, mean should be 25.5 (rounded to 1 decimal)
-    stats.insert("Tokyo".as_bytes().to_vec(), (24.8, 76.6, 3, 26.3));
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16)>::new();
+    // sum=766, count=3, mean should be 255 (in tenths) = 25.5 (rounded to 1 decimal)
+    stats.insert("Tokyo".as_bytes().to_vec(), (248, 766, 3, 263)); // 24.8, 76.6, 26.3 in tenths
 
     let output = format_output(stats);
     assert_eq!(output, "{Tokyo=24.8/25.5/26.3}");
@@ -198,19 +249,29 @@ fn test_process_file_integration() {
 
     assert_eq!(stats.len(), 2);
 
-    // Hamburg: min=8.0, sum=20.0, count=2, max=12.0, mean=10.0
+    // Hamburg: min=8.0*10=80, sum=(12.0+8.0)*10=200, count=2, max=12.0*10=120, mean=200/2/10=10.0
     let (min, sum, count, max) = stats.get("Hamburg".as_bytes()).unwrap();
-    assert!(approx_eq(*min, 8.0));
-    assert!(approx_eq(*sum, 20.0));
+    assert!(approx_eq_i16(*min, 80));
+    assert!(approx_eq_i16(
+        (*sum)
+            .try_into()
+            .expect("should be able to convert sum to i64"),
+        200
+    ));
     assert_eq!(*count, 2);
-    assert!(approx_eq(*max, 12.0));
+    assert!(approx_eq_i16(*max, 120));
 
-    // Berlin: min=20.0, sum=45.0, count=2, max=25.0, mean=22.5
+    // Berlin: min=20.0*10=200, sum=(20.0+25.0)*10=450, count=2, max=25.0*10=250, mean=450/2/10=22.5
     let (min, sum, count, max) = stats.get("Berlin".as_bytes()).unwrap();
-    assert!(approx_eq(*min, 20.0));
-    assert!(approx_eq(*sum, 45.0));
+    assert!(approx_eq_i16(*min, 200));
+    assert!(approx_eq_i16(
+        (*sum)
+            .try_into()
+            .expect("should be able to convert sum to i64"),
+        450
+    ));
     assert_eq!(*count, 2);
-    assert!(approx_eq(*max, 25.0));
+    assert!(approx_eq_i16(*max, 250));
 }
 
 #[test]
@@ -265,9 +326,9 @@ fn create_test_file(data: &str) -> NamedTempFile {
     file
 }
 
-/// Checks if two f64 values are approximately equal (within 0.1).
-fn approx_eq(a: f64, b: f64) -> bool {
-    (a - b).abs() < 0.1
+/// Checks if two i16 values are approximately equal (within 1 unit).
+fn approx_eq_i16(a: i16, b: i16) -> bool {
+    (a - b).abs() <= 1 // Allow tolerance of 1 for rounding differences
 }
 
 /// Parses an input string into a tuple of u8.

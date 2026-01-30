@@ -24,13 +24,13 @@ fn main() {
 // -------------------------------------------- Helper Functions --------------------------------------------
 
 /// Processes a file and returns the statistics for all stations.
-fn process_file(file_path: &str) -> HashMap<Vec<u8>, (f64, f64, usize, f64)> {
+fn process_file(file_path: &str) -> HashMap<Vec<u8>, (i16, i64, usize, i16)> {
     let file =
         File::open(file_path).unwrap_or_else(|_| panic!("Could not open {} file", file_path));
 
     //TODO(key): maybe make the key &[u8], but measure since we'll be breaking MADV_SEQUENTIAL
     // See 44c7b658 for &[u8] key.
-    let mut stats = HashMap::<Vec<u8>, (f64, f64, usize, f64)>::new();
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16)>::new();
 
     //note: We know we're going to read the whole file, so buffered reading isn't optimal.
     // Memory mapping tells the kernel to make the file accessible as memory.
@@ -122,30 +122,66 @@ fn mmap_file(file: &File) -> &[u8] {
 }
 
 /// Processes a single line and updates the stats map.
-fn process_line(line: (&[u8], &[u8]), stats: &mut HashMap<Vec<u8>, (f64, f64, usize, f64)>) {
+fn process_line(line: (&[u8], &[u8]), stats: &mut HashMap<Vec<u8>, (i16, i64, usize, i16)>) {
     let (station, temperature) = line; // avoid utf-8 parsing except for temperature
-    // SAFETY: 1BRC README.md promised valid utf-8 string characters
-    let temperature = unsafe { str::from_utf8_unchecked(temperature) }
-        .parse::<f64>()
-        .expect("Could not parse temperature");
+    let temperature = parse_temperature(temperature);
 
     // Get or insert default value for the station
     let entry = match stats.get_mut(station) {
         Some(existing_stats) => existing_stats,
         None => stats
             .entry(station.to_vec())
-            .or_insert((f64::MAX, 0_f64, 0usize, f64::MIN)),
+            .or_insert((i16::MAX, 0, 0usize, i16::MIN)),
     };
 
     // Update the min, sum, count, and max values for the station
     entry.0 = entry.0.min(temperature); // min
-    entry.1 += temperature; // running sum
+    entry.1 += i64::from(temperature); // running sum
     entry.2 += 1; // count
     entry.3 = entry.3.max(temperature); // max
 }
 
+/// Parses a temperature value encoded as ASCII bytes into a fixed-point integer.
+///
+/// # Format
+/// The input must be in the form:
+/// - `"12.3"`
+/// - `"-4.7"`
+/// - `"0.0"`
+///
+/// The value is returned as **tenths of a degree**:
+/// - `"12.3"`  → `123`
+/// - `"-4.7"`  → `-47`
+///
+/// # Notes
+/// - This function performs **no UTF-8 validation**
+/// - No floating-point operations are used
+/// - Assumes exactly **one decimal digit**
+/// - Designed for high-performance parsing in hot loops (1BRC-style)
+fn parse_temperature(temperature: &[u8]) -> i16 {
+    let mut parsed: i16 = 0;
+    let mut place = 1;
+
+    for &digit in temperature.iter().rev() {
+        match digit {
+            b'.' => {
+                continue;
+            }
+            b'-' => {
+                parsed = -parsed;
+                break;
+            }
+            _ => {
+                parsed += i16::from(digit - b'0') * place;
+                place *= 10;
+            }
+        }
+    }
+    parsed
+}
+
 /// Formats the statistics into the required output format.
-fn format_output(stats: HashMap<Vec<u8>, (f64, f64, usize, f64)>) -> String {
+fn format_output(stats: HashMap<Vec<u8>, (i16, i64, usize, i16)>) -> String {
     // We can;
     // a) sort all the keys,
     // b) move them into BTreeMap
@@ -160,8 +196,13 @@ fn format_output(stats: HashMap<Vec<u8>, (f64, f64, usize, f64)>) -> String {
     let mut stats = stats.iter().peekable();
 
     while let Some((station, (min, sum, count, max))) = stats.next() {
-        let mean = sum / (*count as f64);
-        output.push_str(&format!("{}={:.1}/{:.1}/{:.1}", station, min, mean, max));
+        output.push_str(&format!(
+            "{station}={min:.1}/{mean:.1}/{max:.1}",
+            station = station,
+            min = (*min as f64) / 10_f64,
+            mean = (*sum as f64) / 10_f64 / (*count as f64),
+            max = (*max as f64) / 10_f64
+        ));
 
         // Add comma separator if there are more items to come
         if stats.peek().is_some() {
