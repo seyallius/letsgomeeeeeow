@@ -21,7 +21,9 @@ jobs:
           go-version: stable
           cache: true
           cache-dependency-path: go/go.sum
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly
       - uses: Swatinem/rust-cache@v2
 
       - name: Run all tests
@@ -42,7 +44,9 @@ jobs:
           go-version: stable
           cache: true
           cache-dependency-path: go/go.sum
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly
       - uses: Swatinem/rust-cache@v2
 
       - name: Build all binaries
@@ -57,9 +61,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          components: clippy
+          toolchain: nightly
+          components: clippy  # For the 'clippy' job
       - uses: Swatinem/rust-cache@v2
 
       - name: Run clippy
