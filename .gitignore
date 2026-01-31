@@ -23,4 +23,6 @@ measurements*.txt
 letsgomeeeeeow*
 benchmark_results*.md
 perf.data
+perf.data.old
 flamegraph.svg
+treeclip_temp*.txt
