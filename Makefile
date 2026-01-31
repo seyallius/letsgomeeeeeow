@@ -116,6 +116,14 @@ gen-msrmnt-%: ## Generate measurements file with n rows.
 
 ##@ Go
 
+.PHONY: rust-nightly
+rust-nightly: ## Set nightly version for rust for this project.
+	@rustup override set nightly
+
+.PHONY: rust-nightly-unset
+rust-nightly-unset: ## Unset the nightly rust version for this project.
+	@rustup override unset
+
 .PHONY: gob
 gob: ## Build Go binary.
 	cd $(GO_DIR) && go build -o $(BIN_NAME) main.go

@@ -1,12 +1,19 @@
-use std::collections::{BTreeMap, HashMap};
-use std::fs::File;
-use std::os::fd::AsRawFd;
-use std::{env, io, os, ptr, slice};
+#![feature(portable_simd)]
+#![feature(slice_split_once)]
+
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs::File,
+    os::fd::AsRawFd,
+    simd::{cmp::SimdPartialEq, u8x64},
+    {env, io, os, ptr, slice},
+};
 
 #[cfg(test)]
 mod tests;
 
 const DEFAULT_FILE_PATH: &str = "../measurements.txt";
+const DELIMITER_SEMI: u8x64 = u8x64::splat(b';'); // 64 u8's -> [';', ';', ... ';'] 0..63
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -53,57 +60,13 @@ fn process_file(file_path: &str) -> HashMap<Vec<u8>, (i16, i64, usize, i16)> {
     let mmap = mmap_file(&file);
 
     loop {
-        let rest_mmap_data = &mmap[at..];
-        //note: memchr returns a pointer to where that char appears.
-        // ~cppreference website:
-        //      Pointer to the location of the byte, or a null pointer if no such byte is found.
-        // SAFETY: rest_mmap_data is valid for at lest rest_mmap_data.len() bytes.
-        let next_newline = unsafe {
-            libc::memchr(
-                rest_mmap_data.as_ptr() as *const os::raw::c_void,
-                b'\n' as os::raw::c_int,
-                rest_mmap_data.len(),
-            )
-        };
-        let line = if next_newline.is_null() {
-            //note: there's no need to remember to break on new line
-            // since next iteration will find empty line.
-            // We're basically saying:
-            // if we don't find \n character, line is from at -> EOF
-
-            rest_mmap_data
-        } else {
-            //note: Otherwise;
-            // - `next_newline` is a `*const c_void` pointer to where '\n' was found
-            // - `rest_mmap_data.as_ptr()` is pointer to start of our slice
-            // - `.offset_from()` returns the signed distance between two pointers (in bytes)
-            // - Since `next_newline` is always ≥ `rest_mmap_data.as_ptr()`, the result is positive
-            // - We cast to usize to get the length
-
-            let next_newline = next_newline as *const u8;
-
-            // SAFETY: memchr always returns pointer in rest_mmap_data, which are valid.
-            let len = unsafe { next_newline.offset_from(rest_mmap_data.as_ptr()) };
-
-            //note: ~Jon Gjengset:
-            //          we happen to know that next_newline is always greater than
-            //          the pointer we pass in and as such we know this is positive.
-            let len = len as usize;
-            &rest_mmap_data[..len]
-        };
-        at += line.len() + 1; //note: skipping over the line we found + newline
+        let line = next_line(mmap, &mut at);
 
         if line.is_empty() {
             break;
         }
 
-        let mut fields = line.rsplitn(2, |char| *char == b';');
-        let temperature = fields
-            .next()
-            .expect("failed to extract temperature from split-ted fields");
-        let station = fields
-            .next()
-            .expect("failed to extract station from split-ted fields");
+        let (station, temperature) = split_semi(line);
         process_line((station, temperature), &mut stats);
     }
 
@@ -174,6 +137,74 @@ fn mmap_file(file: &File) -> &[u8] {
         let data = ptr as *const u8;
         let number_of_elements = len as usize;
         slice::from_raw_parts(data, number_of_elements)
+    }
+}
+
+fn next_line<'a>(mmap: &'a [u8], at: &mut usize) -> &'a [u8] {
+    let rest_mmap_data = &mmap[*at..];
+    //note: memchr returns a pointer to where that char appears.
+    // ~cppreference website:
+    //      Pointer to the location of the byte, or a null pointer if no such byte is found.
+    // SAFETY: rest_mmap_data is valid for at lest rest_mmap_data.len() bytes.
+    let next_newline = unsafe {
+        libc::memchr(
+            rest_mmap_data.as_ptr() as *const os::raw::c_void,
+            b'\n' as os::raw::c_int,
+            rest_mmap_data.len(),
+        )
+    };
+    let line = if next_newline.is_null() {
+        //note: there's no need to remember to break on new line
+        // since next iteration will find empty line.
+        // We're basically saying:
+        // if we don't find \n character, line is from at -> EOF
+
+        rest_mmap_data
+    } else {
+        //note: Otherwise;
+        // - `next_newline` is a `*const c_void` pointer to where '\n' was found
+        // - `rest_mmap_data.as_ptr()` is pointer to start of our slice
+        // - `.offset_from()` returns the signed distance between two pointers (in bytes)
+        // - Since `next_newline` is always ≥ `rest_mmap_data.as_ptr()`, the result is positive
+        // - We cast to usize to get the length
+
+        let next_newline = next_newline as *const u8;
+
+        // SAFETY: memchr always returns pointer in rest_mmap_data, which are valid.
+        let len = unsafe { next_newline.offset_from(rest_mmap_data.as_ptr()) };
+
+        //note: ~Jon Gjengset:
+        //          we happen to know that next_newline is always greater than
+        //          the pointer we pass in and as such we know this is positive.
+        let len = len as usize;
+        &rest_mmap_data[..len]
+    };
+    *at += line.len() + 1; //note: skipping over the line we found + newline
+
+    line
+}
+
+fn split_semi(line: &[u8]) -> (&[u8], &[u8]) {
+    //note: We know, line is at most 100 character for station names (100),
+    // plus semicolon (1), plus at most two digits decimal points fraction (5)
+    // 100 + 1 + 5 = 106 bytes.
+    if line.len() > 64 {
+        //note: Slow path
+        // In case the station is a very long station (more than 64 bytes
+        // which basically won't happen)
+        let (station, temperature) = line
+            .rsplit_once(|char| *char == b';')
+            .expect("failed to extract temperature from split-ted fields");
+        (station, temperature)
+    } else {
+        //note: Fast path
+        // Get the semicolon and current line as simd things,
+        // and do concurrent/parallel equality check between these two.
+        let delim_eq_mask = DELIMITER_SEMI.simd_eq(u8x64::load_or_default(line));
+        // SAFETY: 1BRC README promised every line has delimiter i.e., ';'
+        let index_of_delim = unsafe { delim_eq_mask.first_set().unwrap_unchecked() };
+
+        (&line[..index_of_delim], &line[index_of_delim + 1..])
     }
 }
 
