@@ -1,6 +1,7 @@
 #![feature(portable_simd)]
 #![feature(slice_split_once)]
 
+use crate::hasher::DumbHasherBuilder;
 use std::{
     collections::{BTreeMap, HashMap},
     fs::File,
@@ -11,6 +12,8 @@ use std::{
 
 #[cfg(test)]
 mod tests;
+
+mod hasher;
 
 const DEFAULT_FILE_PATH: &str = "../measurements.txt";
 const DELIMITER_SEMI: u8x64 = u8x64::splat(b';'); // 64 u8's -> [';', ';', ... ';'] 0..63
@@ -47,14 +50,17 @@ fn main() {
 /// # Safety
 /// Uses `libc::memchr` on memory-mapped data. The pointers passed to
 /// `memchr` are guaranteed to be valid for the provided length.
-fn process_file(file_path: &str) -> HashMap<Vec<u8>, (i16, i64, usize, i16)> {
+fn process_file(file_path: &str) -> HashMap<Vec<u8>, (i16, i64, usize, i16), DumbHasherBuilder> {
     let file =
         File::open(file_path).unwrap_or_else(|_| panic!("Could not open {} file", file_path));
 
     //TODO(key): maybe make the key &[u8], but measure since we'll be breaking MADV_SEQUENTIAL
     // See 44c7b658 for &[u8] key.
-    const MAX_STATION_CAPACITY: usize = 10_000; //note: README promised.
-    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16)>::with_capacity(MAX_STATION_CAPACITY);
+    const MAX_STATION_CAPACITY: usize = 100_000; //note: README promised.
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16), _>::with_capacity_and_hasher(
+        MAX_STATION_CAPACITY,
+        hasher::DumbHasherBuilder,
+    );
     let mut at = 0;
     //note: We know we're going to read the whole file, so buffered reading isn't optimal.
     // Memory mapping tells the kernel to make the file accessible as memory.
@@ -210,7 +216,10 @@ fn split_semi(line: &[u8]) -> (&[u8], &[u8]) {
 }
 
 /// Processes a single line and updates the stats map.
-fn process_line(line: (&[u8], &[u8]), stats: &mut HashMap<Vec<u8>, (i16, i64, usize, i16)>) {
+fn process_line(
+    line: (&[u8], &[u8]),
+    stats: &mut HashMap<Vec<u8>, (i16, i64, usize, i16), DumbHasherBuilder>,
+) {
     let (station, temperature) = line; // avoid utf-8 parsing except for temperature
     let temperature = parse_temperature(temperature);
 
@@ -269,7 +278,7 @@ fn parse_temperature(temperature: &[u8]) -> i16 {
 }
 
 /// Formats the statistics into the required output format.
-fn format_output(stats: HashMap<Vec<u8>, (i16, i64, usize, i16)>) -> String {
+fn format_output(stats: HashMap<Vec<u8>, (i16, i64, usize, i16), DumbHasherBuilder>) -> String {
     // We can;
     // a) sort all the keys,
     // b) move them into BTreeMap

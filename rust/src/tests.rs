@@ -78,7 +78,10 @@ fn test_line_parsing_with_mmap_data() {
 
 #[test]
 fn test_process_line_single_entry() {
-    let mut stats = HashMap::new();
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16), _>::with_capacity_and_hasher(
+        100,
+        DumbHasherBuilder,
+    );
     process_line(parse_input_to_tuple("Hamburg;12.0"), &mut stats);
 
     assert_eq!(stats.len(), 1);
@@ -98,7 +101,10 @@ fn test_process_line_single_entry() {
 
 #[test]
 fn test_process_line_multiple_same_station() {
-    let mut stats = HashMap::new();
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16), _>::with_capacity_and_hasher(
+        100,
+        DumbHasherBuilder,
+    );
     process_line(parse_input_to_tuple("Hamburg;12.0"), &mut stats);
     process_line(parse_input_to_tuple("Hamburg;15.0"), &mut stats);
     process_line(parse_input_to_tuple("Hamburg;9.0"), &mut stats);
@@ -119,7 +125,10 @@ fn test_process_line_multiple_same_station() {
 
 #[test]
 fn test_process_line_multiple_stations() {
-    let mut stats = HashMap::new();
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16), _>::with_capacity_and_hasher(
+        100,
+        DumbHasherBuilder,
+    );
     process_line(parse_input_to_tuple("Hamburg;12.0"), &mut stats);
     process_line(parse_input_to_tuple("Berlin;20.0"), &mut stats);
     process_line(parse_input_to_tuple("Hamburg;8.0"), &mut stats);
@@ -153,7 +162,10 @@ fn test_process_line_multiple_stations() {
 
 #[test]
 fn test_process_line_negative_temperatures() {
-    let mut stats = HashMap::new();
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16), _>::with_capacity_and_hasher(
+        100,
+        DumbHasherBuilder,
+    );
     process_line(parse_input_to_tuple("Oslo;-5.0"), &mut stats);
     process_line(parse_input_to_tuple("Oslo;-10.0"), &mut stats);
     process_line(parse_input_to_tuple("Oslo;-2.0"), &mut stats);
@@ -198,7 +210,10 @@ fn test_parse_temperature_single_digit_before_decimal() {
 
 #[test]
 fn test_format_output_single_station() {
-    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16)>::new();
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16), _>::with_capacity_and_hasher(
+        100,
+        DumbHasherBuilder,
+    );
     stats.insert("Hamburg".as_bytes().to_vec(), (90, 360, 3, 150)); // 9.0, 36.0, 15.0 in tenths
 
     let output = format_output(stats);
@@ -207,7 +222,10 @@ fn test_format_output_single_station() {
 
 #[test]
 fn test_format_output_multiple_stations_alphabetical() {
-    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16)>::new();
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16), _>::with_capacity_and_hasher(
+        100,
+        DumbHasherBuilder,
+    );
     stats.insert("Hamburg".as_bytes().to_vec(), (50, 300, 3, 150)); // 5.0, 30.0, 15.0 in tenths
     stats.insert("Berlin".as_bytes().to_vec(), (100, 450, 3, 200)); // 10.0, 45.0, 20.0 in tenths
     stats.insert("Copenhagen".as_bytes().to_vec(), (0, 150, 3, 100)); // 0.0, 15.0, 10.0 in tenths
@@ -222,7 +240,10 @@ fn test_format_output_multiple_stations_alphabetical() {
 
 #[test]
 fn test_format_output_decimal_precision() {
-    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16)>::new();
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16), _>::with_capacity_and_hasher(
+        100,
+        DumbHasherBuilder,
+    );
     // sum=766, count=3, mean should be 255 (in tenths) = 25.5 (rounded to 1 decimal)
     stats.insert("Tokyo".as_bytes().to_vec(), (248, 766, 3, 263)); // 24.8, 76.6, 26.3 in tenths
 
@@ -232,7 +253,10 @@ fn test_format_output_decimal_precision() {
 
 #[test]
 fn test_format_output_empty() {
-    let stats = HashMap::new();
+    let stats = HashMap::<Vec<u8>, (i16, i64, usize, i16), _>::with_capacity_and_hasher(
+        0,
+        DumbHasherBuilder,
+    );
     let output = format_output(stats);
     assert_eq!(output, "{}");
 }
