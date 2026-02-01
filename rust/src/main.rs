@@ -53,7 +53,8 @@ fn process_file(file_path: &str) -> HashMap<Vec<u8>, (i16, i64, usize, i16)> {
 
     //TODO(key): maybe make the key &[u8], but measure since we'll be breaking MADV_SEQUENTIAL
     // See 44c7b658 for &[u8] key.
-    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16)>::new();
+    const MAX_STATION_CAPACITY: usize = 10_000; //note: README promised.
+    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16)>::with_capacity(MAX_STATION_CAPACITY);
     let mut at = 0;
     //note: We know we're going to read the whole file, so buffered reading isn't optimal.
     // Memory mapping tells the kernel to make the file accessible as memory.
