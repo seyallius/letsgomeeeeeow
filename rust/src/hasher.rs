@@ -1,22 +1,11 @@
-///! hasher provides a custom hash implementation optimized for the 1BRC challenge.
-///! This hasher is designed to be fast for station name keys in the weather measurements dataset.
+//! hasher provides a custom hash implementation optimized for the 1BRC challenge.
+//! This hasher is designed to be fast for station name keys in the weather measurements dataset.
 use std::{hash, iter};
 
 
 /// A simple hasher map hasher. Uses polynomial rolling hash approach with multiplication and XOR mixing.
 /// This hasher trades cryptographic security for speed, which is perfect for our use case
 /// where we're just counting weather station measurements.
-///
-///note: Custom hasher usage notes:
-/// - DumbHasher is optimized for string keys (station names) in our dataset
-/// - Trades cryptographic security for raw speed (perfect for this challenge)
-/// - Initial seed uses FNV-1a offset basis for better hash distribution
-/// - The hash algorithm uses 128-bit intermediate calculations to avoid overflow
-///   while maintaining good mixing properties
-/// Performance considerations:
-/// - Avoids expensive modulo operations during hash table probing
-/// - Simple arithmetic operations (multiply, shift, xor) for maximum throughput
-/// - Works well with the typical length of European city names in the dataset
 pub struct DumbHasher(u64);
 
 impl hash::Hasher for DumbHasher {
