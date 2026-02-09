@@ -41,8 +41,8 @@ let mmap = mmap_file( & file);
 
 ```rust
 let mut stats = HashMap::with_capacity_and_hasher(
-MAX_STATION_CAPACITY,
-hasher::DumbHasherBuilder,
+  MAX_STATION_CAPACITY,
+  hasher::DumbHasherBuilder,
 );
 ```
 
@@ -64,7 +64,7 @@ byte.
 
 ```rust
 let next_newline = unsafe {
-libc::memchr(..., b'\n', ...)
+  libc::memchr(..., b'\n', ...)
 };
 ```
 
