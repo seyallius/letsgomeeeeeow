@@ -137,8 +137,7 @@ go: gob ## Run Go binary.
 .PHONY: rustb
 rustb: ## Build Rust binary (release).
 	cd $(RUST_DIR) && \
-	RUSTFLAGS="-C force-frame-pointers=yes" && \
-	cargo build --release # makes stack traces much more accurate
+	cargo build --release
 
 .PHONY: rust
 rust: rustb ## Run Rust binary.
