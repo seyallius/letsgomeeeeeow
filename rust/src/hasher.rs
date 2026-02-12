@@ -2,7 +2,6 @@
 //! This hasher is designed to be fast for station name keys in the weather measurements dataset.
 use std::{hash, iter};
 
-
 /// A simple hasher map hasher. Uses polynomial rolling hash approach with multiplication and XOR mixing.
 /// This hasher trades cryptographic security for speed, which is perfect for our use case
 /// where we're just counting weather station measurements.
@@ -19,6 +18,7 @@ impl hash::Hasher for DumbHasher {
     /// Chunks the input into 8-byte segments and applies polynomial mixing.
     /// The last chunk (or partial chunk) is padded with 1's to ensure consistent behavior.
     fn write(&mut self, bytes: &[u8]) {
+        // if bytes.len() > 16 {
         let (chunks, remainder) = bytes.as_chunks::<8>();
         let mut last = [1u8; 8];
         last[..remainder.len()].copy_from_slice(remainder);
@@ -27,6 +27,19 @@ impl hash::Hasher for DumbHasher {
             let mixed = self.0 as u128 * (u64::from_ne_bytes(chunk) as u128);
             self.0 = (mixed >> 64) as u64 ^ mixed as u64;
         }
+        // } else {
+        //     let mut last = [0u8; 16];
+        //     last[..bytes.len()].copy_from_slice(bytes);
+        //     let left = i64::from_ne_bytes([
+        //         last[0], last[1], last[2], last[3], last[4], last[5], last[6], last[7],
+        //     ]);
+        //     let right = i64::from_ne_bytes([
+        //         last[8], last[9], last[10], last[11], last[12], last[13], last[14], last[15],
+        //     ]);
+        //     let mut h = (left ^ right) * -7046029254386353131;
+        //     h ^= h >> 35;
+        //     self.0 = h as u64;
+        // }
     }
 }
 
