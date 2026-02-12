@@ -224,6 +224,10 @@ perf-report: ## View last perf recording (interactive).
 perf-flamegraph: ## Generate flamegraph from perf.data.
 	@perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg
 
+.PHONY: asm
+asm: ## View assembly: make asm FUNCTION=letsgomeeeeeow::hot_loop
+	cd rust && cargo asm --bin letsgomeeeeeow $(or $(FUNCTION), letsgomeeeeeow::main) --rust
+
 ##@ Cleanup
 
 .PHONY: clean-go
