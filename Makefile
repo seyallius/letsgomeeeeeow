@@ -200,7 +200,7 @@ cmpr: rustb gob ## Performance comparison with formatted timing.
 .PHONY: cmpr-hyperfine
 cmpr-hyperfine: rustb gob ## Run both and compare (hyperfine benchmark).
 	@echo "=== Hyperfine Benchmark (5 runs) ==="
-	@hyperfine --warmup 1 \
+	@hyperfine --warmup 3 \
 		"$(RUST_BIN) $(MEASUREMENTS_FILE)" \
 		"$(GO_BIN) $(MEASUREMENTS_FILE)" \
 		--export-markdown benchmark_results.md

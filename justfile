@@ -202,7 +202,7 @@ cmpr: rustb gob
 [group('Benchmark')]
 cmpr-hyperfine: rustb gob
     @echo -e "{{c_bold}}=== Hyperfine Benchmark (5 runs) ==={{c_reset}}"
-    hyperfine --warmup 1 \
+    hyperfine --warmup 3 \
         "{{rust_bin}} {{measurements_file}}" \
         "{{go_bin}} {{measurements_file}}" \
         --export-markdown benchmark_results.md
