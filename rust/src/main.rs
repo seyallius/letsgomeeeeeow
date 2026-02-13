@@ -147,46 +147,69 @@ fn mmap_file(file: &File) -> &[u8] {
     }
 }
 
+/// Returns the next line from the memory-mapped file.
+///
+/// # Arguments
+/// * `mmap` - The memory-mapped file contents
+/// * `at` - Current position in the file (mutated to point to next line)
+///
+/// # Returns
+/// A byte slice containing the next line (without newline)
+///
+/// # Note
+/// When EOF is reached, returns the remaining data. The next call will
+/// find an empty slice and the loop should break.
 fn next_line<'a>(mmap: &'a [u8], at: &mut usize) -> &'a [u8] {
-    let rest_mmap_data = &mmap[*at..];
+    let remaining_mmap_data = &mmap[*at..];
     //note: memchr returns a pointer to where that char appears.
     // ~cppreference website:
     //      Pointer to the location of the byte, or a null pointer if no such byte is found.
-    // SAFETY: rest_mmap_data is valid for at lest rest_mmap_data.len() bytes.
+    //SAFETY: remaining_mmap_data is valid for at least remaining_mmap_data.len() bytes,
+    // which is exactly the range we're searching within.
     let next_newline = unsafe {
         libc::memchr(
-            rest_mmap_data.as_ptr() as *const os::raw::c_void,
+            remaining_mmap_data.as_ptr() as *const os::raw::c_void,
             b'\n' as os::raw::c_int,
-            rest_mmap_data.len(),
+            remaining_mmap_data.len(),
         )
     };
-    let line = if next_newline.is_null() {
-        //note: there's no need to remember to break on new line
+    let newline_ptr = unsafe {
+        libc::memchr(
+            remaining_mmap_data.as_ptr() as *const libc::c_void,
+            b'\n' as libc::c_int,
+            remaining_mmap_data.len(),
+        )
+    };
+    let line = if newline_ptr.is_null() {
+        //note: No newline found - we're at EOF. Return everything remaining.
+        // The next call will find at == mmap.len() and return empty slice.
+        // There's no need to remember to break on new line
         // since next iteration will find empty line.
         // We're basically saying:
         // if we don't find \n character, line is from at -> EOF
 
-        rest_mmap_data
+        remaining_mmap_data
     } else {
         //note: Otherwise;
         // - `next_newline` is a `*const c_void` pointer to where '\n' was found
-        // - `rest_mmap_data.as_ptr()` is pointer to start of our slice
+        // - `remaining_mmap_data.as_ptr()` is pointer to start of our slice
         // - `.offset_from()` returns the signed distance between two pointers (in bytes)
-        // - Since `next_newline` is always ≥ `rest_mmap_data.as_ptr()`, the result is positive
+        // - Since `next_newline` is always ≥ `remaining_mmap_data.as_ptr()`, the result is positive
         // - We cast to usize to get the length
 
         let next_newline = next_newline as *const u8;
 
-        // SAFETY: memchr always returns pointer in rest_mmap_data, which are valid.
-        let len = unsafe { next_newline.offset_from(rest_mmap_data.as_ptr()) };
+        //SAFETY: memchr always returns pointer in remaining_mmap_data bounds,
+        // which are valid so offset_from gives us the exact line length.
+        let len = unsafe { next_newline.offset_from(remaining_mmap_data.as_ptr()) };
 
         //note: ~Jon Gjengset:
         //          we happen to know that next_newline is always greater than
         //          the pointer we pass in and as such we know this is positive.
         let len = len as usize;
-        &rest_mmap_data[..len]
+        &remaining_mmap_data[..len]
     };
-    *at += line.len() + 1; //note: skipping over the line we found + newline
+    *at += line.len() + 1; //note: +1 to skip the newline character; skipping over the line we found + newline
 
     line
 }
