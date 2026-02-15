@@ -185,6 +185,22 @@ test-all: test-go test-rust ## Run all tests.
 
 ##@ Benchmark
 
+.PHONY: hyperfine-rust
+hyperfine-rust: rustb ## Run hyperfine benchmark for rust
+	@echo "=== Hyperfine Benchmark Rust (3 runs) ==="
+	hyperfine --warmup 3 --runs 3 \
+	"$(RUST_BIN) $(MEASUREMENTS_FILE)" \
+	--export-markdown benchmark_results.md \
+    @cat benchmark_results.md
+
+.PHONY: hyperfine-go
+hyperfine-go: gob ## Run hyperfine benchmark for go
+	@echo -e "=== Hyperfine Benchmark Go (3 runs) ==="
+	hyperfine --warmup 3 --runs 3 \
+	"$(GO_BIN) $(MEASUREMENTS_FILE)" \
+	--export-markdown benchmark_results.md
+	@cat benchmark_results.md
+
 .PHONY: cmpr
 cmpr: rustb gob ## Performance comparison with formatted timing.
 	@echo "=== Rust Performance ==="
