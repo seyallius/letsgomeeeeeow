@@ -1,5 +1,6 @@
 #![feature(portable_simd)]
 #![feature(slice_split_once)]
+#![feature(hasher_prefixfree_extras)]
 
 use crate::hasher::DumbHasherBuilder;
 use std::{
