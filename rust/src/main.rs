@@ -18,6 +18,7 @@ mod hasher;
 
 const DEFAULT_FILE_PATH: &str = "../measurements.txt";
 const DELIMITER_SEMI: u8x64 = u8x64::splat(b';'); // 64 u8's -> [';', ';', ... ';'] 0..63
+const DELIMITER_NEW_L: u8x64 = u8x64::splat(b'\n'); // 64 u8's -> ['\n', \n', ... '\n'] 0..63
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -72,12 +73,17 @@ fn process_file(file_path: &str) -> HashMap<Vec<u8>, (i16, i64, usize, i16), Dum
     // Memory mapping tells the kernel to make the file accessible as memory.
     let mmap = mmap_file(&file);
 
-    loop {
-        let line = next_line(mmap, &mut at);
+    //note: Changed from loop with next_line to while loop with next_newline
+    // This allows us to use SIMD for newline detection instead of just memchr
+    while at < mmap.len() {
+        // let line = next_line(mmap, &mut at);
+        let newline_at = at + next_newline(mmap, at);
+        let line = &mmap[at..newline_at];
+        at = newline_at + 1; //note: current line processing finished - go to next line
 
-        if line.is_empty() {
-            break;
-        }
+        // if line.is_empty() {
+        //     break;
+        // }
 
         let (station, temperature) = split_semi(line);
         process_line((station, temperature), &mut stats);
@@ -165,6 +171,8 @@ fn mmap_file(file: &File) -> &[u8] {
 /// # Note
 /// When EOF is reached, returns the remaining data. The next call will
 /// find an empty slice and the loop should break.
+#[allow(dead_code)]
+#[deprecated]
 fn next_line<'a>(mmap: &'a [u8], at: &mut usize) -> &'a [u8] {
     let remaining_mmap_data = &mmap[*at..];
     //note: memchr returns a pointer to where that char appears.
@@ -218,6 +226,54 @@ fn next_line<'a>(mmap: &'a [u8], at: &mut usize) -> &'a [u8] {
     *at += line.len() + 1; //note: +1 to skip the newline character; skipping over the line we found + newline
 
     line
+}
+
+/// Finds the position of the next newline character using SIMD operations.
+///
+/// This function searches for a newline character starting from position `at` in the memory map.
+/// It uses SIMD instructions to check 64 bytes at once for efficiency, falling back to `memchr`
+/// if the newline is not found in the first 64 bytes.
+///
+/// # Arguments
+/// * `mmap` - The memory-mapped file contents
+/// * `at` - Current position in the file to start searching from
+///
+/// # Returns
+/// The relative offset from the starting position `at` where the newline character was found
+///
+/// # Note
+/// This function assumes there is always a newline character in the remaining data
+/// (which is true for the 1BRC input format).
+fn next_newline(mmap: &[u8], at: usize) -> usize {
+    let remaining = &mmap[at..];
+
+    //note: Use SIMD to check the first 64 bytes for newline character in parallel
+    let newline_eq = DELIMITER_NEW_L.simd_eq(u8x64::load_or_default(remaining));
+    if let Some(new_l_pos) = newline_eq.first_set() {
+        new_l_pos
+    } else {
+        //note: If SIMD didn't find a newline in the first 64 bytes, fall back to memchr
+        // We know line is at most 106 bytes (100 chars + semicolon + 5 digits), but we can only search 64 bytes
+        // So the search may have to fall back to memchr if newline is beyond first 64 bytes
+        // We know there must be a newline, so rest[64..] must be non-empty
+        let rest_remaining = &remaining[64..];
+        // SAFETY: rest_remaining is valid for at least rest_remaining.len() bytes
+        let next_newline = unsafe {
+            libc::memchr(
+                rest_remaining.as_ptr() as *const os::raw::c_void,
+                b'\n' as os::raw::c_int,
+                rest_remaining.len(),
+            )
+        };
+
+        //note: Assert that we found a newline since the input format guarantees it
+        assert!(!next_newline.is_null());
+
+        // SAFETY: memchr always returns pointers in rest_remaining, which are valid
+        let len =
+            unsafe { (next_newline as *const u8).offset_from(rest_remaining.as_ptr()) } as usize;
+        64 + len
+    }
 }
 
 fn split_semi(line: &[u8]) -> (&[u8], &[u8]) {
