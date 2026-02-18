@@ -248,8 +248,8 @@ perf-flamegraph:
 
 # Show the assembly code that the Rust compiler generates.
 [group('Benchmark')]
-asm function="letsgomeeeeeow::main":
-	cd rust && cargo asm --bin letsgomeeeeeow {{function}} --rust
+asm function="letsgomeeeeeow::main" extraCmd="":
+	cd rust && cargo asm --bin letsgomeeeeeow {{function}} --rust {{extraCmd}}
 
 # ------------------------------------------------------------------------------
 # Cleanup

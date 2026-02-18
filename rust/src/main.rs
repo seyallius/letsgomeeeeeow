@@ -340,6 +340,7 @@ fn process_line(
 /// - No floating-point operations are used
 /// - Assumes exactly **one decimal digit**
 /// - Designed for high-performance parsing in hot loops (1BRC-style)
+#[inline(never)]
 fn parse_temperature(temperature: &[u8]) -> i16 {
     let mut parsed: i16 = 0;
     let mut place = 1;
