@@ -28,11 +28,6 @@ mod layout {
     pub const MULTIPLIER_ONE_DIGIT: i16 = 10;
 }
 
-mod bytes {
-    pub const FIRST: usize = 0;
-    pub const SECOND: usize = 1;
-}
-
 const DEFAULT_FILE_PATH: &str = "../measurements.txt";
 const DELIMITER_SEMI: u8x64 = u8x64::splat(b';'); // 64 u8's -> [';', ';', ... ';'] 0..63
 const DELIMITER_NEW_L: u8x64 = u8x64::splat(b'\n'); // 64 u8's -> ['\n', \n', ... '\n'] 0..63
@@ -340,29 +335,33 @@ fn process_line(
     entry.3 = entry.3.max(temperature); // max
 }
 
-/// Parses a temperature value encoded as ASCII bytes into a fixed-point integer.
+/// Parses a temperature string from a byte slice into an `i16` integer.
 ///
-/// # Format
-/// The input must be in the form:
-/// - `"12.3"`
-/// - `"-4.7"`
-/// - `"0.0"`
+/// The function is highly optimized and uses a branchless implementation to avoid
+/// CPU pipeline stalls in tight loops. It assumes the input format is a UTF-8
+/// byte slice representing a number with exactly one decimal place, and it
+/// returns the value multiplied by 10 (e.g., "98.2" -> 982).
 ///
-/// The value is returned as **tenths of a degree**:
-/// - `"12.3"`  → `123`
-/// - `"-4.7"`  → `-47`
+/// # Panics
 ///
-/// # Notes
-/// - This function performs **no UTF-8 validation**
-/// - No floating-point operations are used
-/// - Assumes exactly **one decimal digit**
-/// - Designed for high-performance parsing in hot loops (1BRC-style)
-#[inline(never)]
+/// This function may panic or return incorrect results if the input does not
+/// strictly adhere to the expected format (e.g., `"-?[0-9][0-9]?.?[0-9]"`).
+/// Specifically, it asserts that the input length is at least 3 bytes.
+///
+/// # Examples
+///
+/// ```rust
+/// assert_eq!(parse_temperature(b"0.0"), 0);
+/// assert_eq!(parse_temperature(b"9.2"), 92);
+/// assert_eq!(parse_temperature(b"-9.2"), -92);
+/// assert_eq!(parse_temperature(b"98.2"), 982);
+/// assert_eq!(parse_temperature(b"-98.2"), -982);
+/// ```
 fn parse_temperature(temperature: &[u8]) -> i16 {
     let tlen = temperature.len();
     assert!(tlen >= 3); //note: the input is at least 3 bytes long (the shortest possible is “0.0”).
 
-    let first_byte_is_minus = temperature[bytes::FIRST] == ascii::MINUS;
+    let first_byte_is_minus = temperature[0] == ascii::MINUS;
 
     //note: Branchless Sign Calculation:
     // This single line calculates the sign (1 or -1) using pure arithmetic, with no if statement and thus no potential for a branch misprediction.
@@ -423,7 +422,7 @@ fn parse_temperature(temperature: &[u8]) -> i16 {
     // temperature[tlen - 1]: This always points to the very last byte, which is the digit after the decimal point (the “units” digit of our final integer).
     // For “98.2”, this is b'2', so t3 is 2.
     // For “9.2”, this is b'2', so t3 is 2.
-    let units_digit = temperature[tlen - bytes::SECOND];
+    let units_digit = temperature[tlen - 1];
     let t3 = i16::from(units_digit - ascii::ZERO);
 
     //note: Finally, the three parts are summed and multiplied by the sign we calculated at the very beginning.
