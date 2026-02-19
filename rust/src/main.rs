@@ -16,6 +16,23 @@ mod tests;
 
 mod hasher;
 
+mod ascii {
+    pub const MINUS: u8 = b'-';
+    pub const ZERO: u8 = b'0';
+}
+
+mod layout {
+    pub const TWO_DIGIT_FORMAT_LEN: usize = 4;
+
+    pub const MULTIPLIER_TWO_DIGIT: i16 = 100;
+    pub const MULTIPLIER_ONE_DIGIT: i16 = 10;
+}
+
+mod bytes {
+    pub const FIRST: usize = 0;
+    pub const SECOND: usize = 1;
+}
+
 const DEFAULT_FILE_PATH: &str = "../measurements.txt";
 const DELIMITER_SEMI: u8x64 = u8x64::splat(b';'); // 64 u8's -> [';', ';', ... ';'] 0..63
 const DELIMITER_NEW_L: u8x64 = u8x64::splat(b'\n'); // 64 u8's -> ['\n', \n', ... '\n'] 0..63
@@ -342,25 +359,75 @@ fn process_line(
 /// - Designed for high-performance parsing in hot loops (1BRC-style)
 #[inline(never)]
 fn parse_temperature(temperature: &[u8]) -> i16 {
-    let mut parsed: i16 = 0;
-    let mut place = 1;
+    let tlen = temperature.len();
+    assert!(tlen >= 3); //note: the input is at least 3 bytes long (the shortest possible is “0.0”).
 
-    for &digit in temperature.iter().rev() {
-        match digit {
-            b'.' => {
-                continue;
-            }
-            b'-' => {
-                parsed = -parsed;
-                break;
-            }
-            _ => {
-                parsed += i16::from(digit - b'0') * place;
-                place *= 10;
-            }
-        }
-    }
-    parsed
+    let first_byte_is_minus = temperature[bytes::FIRST] == ascii::MINUS;
+
+    //note: Branchless Sign Calculation:
+    // This single line calculates the sign (1 or -1) using pure arithmetic, with no if statement and thus no potential for a branch misprediction.
+    // Case 1: Positive number (e.g., temperature[0] is b'9').
+    //  - temperature[0] != b'-' evaluates to true.
+    //  - i16::from(true) converts the boolean true to the integer 1.
+    //  - The calculation becomes 1 * 2 - 1, which equals 1.
+    // Case 2: Negative number (e.g., temperature[0] is b'-').
+    //  - temperature[0] != b'-' evaluates to false.
+    //  - i16::from(false) converts the boolean false to the integer 0.
+    //  - The calculation becomes 0 * 2 - 1, which equals -1.
+    let is_positive = !first_byte_is_minus;
+    let sign = i16::from(is_positive) * 2 - 1; // or let sign = 1 - ((first_byte_is_minus as i16) << 1); ==> [minus → 1 - 2 = -1, positive → 1 - 0 = 1]
+
+    //note: Fake Branches:
+    // These look exactly like branches. However, a modern optimizing compiler (like Rust’s) is extremely smart.
+    // For simple if/else statements that just select a value, it can often translate them into a conditional move instruction (e.g., cmov on x86).
+    // A cmov instruction doesn’t cause a pipeline-flushing jump. It effectively says: “I’ve already calculated both values;
+    // now, based on this flag, move either value A or value B into the destination register.” It’s a conditional "operation", not a conditional "jump",
+    // which is much faster if the prediction is hard.
+    //
+    //note: determines the starting position for parsing the digits. If there’s a negative sign, we need to skip the first byte.
+    // The compiler will likely turn this into a cmov.
+    let sign_offset = if first_byte_is_minus { 1 } else { 0 };
+    //note: trick to figure out if we’re parsing a one-digit or two-digit number (before the decimal).
+    // * tlen - sign_offset gives the length of the number part
+    //   (e.g., for "-98.2", tlen is 5, sign_offset is 1, so 5-1=4. For "9.2", tlen is 3, sign_offset is 0, so 3-0=3).
+    // * If the number part has 4 characters (e.g., “98.2”), it must be a two-digit number. The first digit '9' represents 90, which is 9 * 10. To get 982,
+    //   we need to treat the first digit as hundreds. So multiplier becomes 100.
+    // * If the number part has 3 characters (e.g., “9.2”), it’s a one-digit number. The first digit '9' represents 90, which is 9 * 10. So multiplier becomes 10.
+    let number_len = tlen - sign_offset;
+    let multiplier = if number_len == layout::TWO_DIGIT_FORMAT_LEN {
+        layout::MULTIPLIER_TWO_DIGIT
+    } else {
+        layout::MULTIPLIER_ONE_DIGIT
+    };
+
+    //note: Parsing the Digits:
+    // Parse the number as a sum of three parts: t1, t2, and t3, which represent the hundreds, tens, and units digits of the final integer value.
+    let first_digit_byte = temperature[sign_offset]; // Gets the first digit of the number, whether there was a sign or not.
+    let first_digit = first_digit_byte - ascii::ZERO; // Standard ASCII trick to convert a character digit ('0' to '9') into its integer value (0 to 9).
+    //note: The first digit its correct magnitude - always exists.
+    // For “98.2”, multiplier is 100, first_digit_byte is b'9'. t1 becomes 100 * 9 = 900.
+    // For “9.2”, multiplier is 10, first_digit_byte is b'9'. t1 becomes 10 * 9 = 90.
+    let t1 = multiplier * i16::from(first_digit);
+    //note: Calculates the value of the “tens” digit, but only if it exists.
+    // has_second_digit: This is another branchless switch.
+    //   * If it’s a one-digit number (“9.2”), multiplier is 10. This expression becomes 0. The entire t2 calculation becomes 0, effectively ignoring the tens digit.
+    //   * If it’s a two-digit number (“98.2”), multiplier is 100. This expression becomes 1. The t2 calculation proceeds.
+    // temperature[tlen - 3]: This index always points to the second digit of a two-digit number.
+    //   * For “98.2” (tlen=4), temperature[4-3] is temperature[1], which is b'8'.
+    //   * For “-98.2” (tlen=5), temperature[5-3] is temperature[2], which is b'8'.
+    //   So for “98.2”, t2 becomes 1 * 10 * 8 = 80. For “9.2”, it becomes 0.
+    let has_second_digit = if multiplier == 10 { 0 } else { 1 };
+    let second_digit_of_two_digit_number = temperature[tlen - 3];
+    let t2 = has_second_digit * 10 * i16::from(second_digit_of_two_digit_number - ascii::ZERO);
+    //note: ...
+    // temperature[tlen - 1]: This always points to the very last byte, which is the digit after the decimal point (the “units” digit of our final integer).
+    // For “98.2”, this is b'2', so t3 is 2.
+    // For “9.2”, this is b'2', so t3 is 2.
+    let units_digit = temperature[tlen - bytes::SECOND];
+    let t3 = i16::from(units_digit - ascii::ZERO);
+
+    //note: Finally, the three parts are summed and multiplied by the sign we calculated at the very beginning.
+    sign * (t1 + t2 + t3)
 }
 
 /// Formats the statistics into the required output format.
