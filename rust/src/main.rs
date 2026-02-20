@@ -17,8 +17,16 @@ mod tests;
 mod hasher;
 
 mod ascii {
+    use super::*;
+
     pub const MINUS: u8 = b'-';
     pub const ZERO: u8 = b'0';
+    pub const SEMICOLON: u8 = b';';
+    pub const NEWLINE: u8 = b'\n';
+
+    // SIMD vectors for ASCII delimiters
+    pub const DELIMITER_SEMI: u8x64 = u8x64::splat(SEMICOLON);
+    pub const DELIMITER_NEW_L: u8x64 = u8x64::splat(NEWLINE);
 }
 
 mod layout {
@@ -29,8 +37,6 @@ mod layout {
 }
 
 const DEFAULT_FILE_PATH: &str = "../measurements.txt";
-const DELIMITER_SEMI: u8x64 = u8x64::splat(b';'); // 64 u8's -> [';', ';', ... ';'] 0..63
-const DELIMITER_NEW_L: u8x64 = u8x64::splat(b'\n'); // 64 u8's -> ['\n', \n', ... '\n'] 0..63
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -260,7 +266,7 @@ fn next_newline(mmap: &[u8], at: usize) -> usize {
     let remaining = &mmap[at..];
 
     //note: Use SIMD to check the first 64 bytes for newline character in parallel
-    let newline_eq = DELIMITER_NEW_L.simd_eq(u8x64::load_or_default(remaining));
+    let newline_eq = ascii::DELIMITER_NEW_L.simd_eq(u8x64::load_or_default(remaining));
     if let Some(new_l_pos) = newline_eq.first_set() {
         new_l_pos
     } else {
@@ -304,7 +310,7 @@ fn split_semi(line: &[u8]) -> (&[u8], &[u8]) {
         //note: Fast path
         // Get the semicolon and current line as simd things,
         // and do concurrent/parallel equality check between these two.
-        let delim_eq_mask = DELIMITER_SEMI.simd_eq(u8x64::load_or_default(line));
+        let delim_eq_mask = ascii::DELIMITER_SEMI.simd_eq(u8x64::load_or_default(line));
         // SAFETY: 1BRC README promised every line has delimiter i.e., ';'
         let index_of_delim = unsafe { delim_eq_mask.first_set().unwrap_unchecked() };
 
