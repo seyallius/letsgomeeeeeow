@@ -34,6 +34,7 @@ mod layout {
 
     pub const MULTIPLIER_TWO_DIGIT: i16 = 100;
     pub const MULTIPLIER_ONE_DIGIT: i16 = 10;
+    pub const CACHE_LINE_SIZE: usize = 64;
 }
 
 const DEFAULT_FILE_PATH: &str = "../measurements.txt";
@@ -246,8 +247,9 @@ fn next_line<'a>(mmap: &'a [u8], at: &mut usize) -> &'a [u8] {
     line
 }
 
-/// Finds the position of the next newline character using SIMD operations.
+/// Finds the position of the next newline character using SIMD and raw pointer scanning.
 ///
+/// This is a hot-path function called once per line (~1B times).
 /// This function searches for a newline character starting from position `at` in the memory map.
 /// It uses SIMD instructions to check 64 bytes at once for efficiency, falling back to `memchr`
 /// if the newline is not found in the first 64 bytes.
@@ -256,17 +258,39 @@ fn next_line<'a>(mmap: &'a [u8], at: &mut usize) -> &'a [u8] {
 /// * `mmap` - The memory-mapped file contents
 /// * `at` - Current position in the file to start searching from
 ///
+/// - Slices carry `(ptr, len)` metadata and trigger bounds checks.
+/// - In tight loops, that overhead adds up.
+/// - Raw pointers let the compiler keep everything in registers.
+///
+/// Strategy:
+/// 1. SIMD-scan the first 64 bytes for '\n'
+/// 2. If not found, fall back to `memchr` on the remainder
+///
+/// # Safety
+/// - The 1BRC input guarantees every line ends with `\n`
+/// - All pointer arithmetic stays within the mapped file
+///
 /// # Returns
 /// The relative offset from the starting position `at` where the newline character was found
-///
-/// # Note
-/// This function assumes there is always a newline character in the remaining data
-/// (which is true for the 1BRC input format).
 fn next_newline(mmap: &[u8], at: usize) -> usize {
-    let remaining = &mmap[at..];
+    //SAFETY: caller guarantees `at < map.len()`
+    // We avoid creating smaller slices repeatedly by doing one unchecked slice here.
+    let remaining = unsafe { mmap.get_unchecked(at..) };
+
+    //note: Fast path — SIMD scan of the first 64 bytes (layout::CACHE_LINE_SIZE)
+    let against = if let Some((remaining_u8x64_chunk, _)) =
+        //note: Load exactly one cache line and check it in parallel.
+        remaining.split_first_chunk::<{ layout::CACHE_LINE_SIZE }>()
+    {
+        //note: We have at least 64 bytes (layout::CACHE_LINE_SIZE), load directly
+        u8x64::from_array(*remaining_u8x64_chunk)
+    } else {
+        //note: Slow path - Line is shorter than 64 bytes; pad with zeroes
+        u8x64::load_or_default(remaining)
+    };
 
     //note: Use SIMD to check the first 64 bytes for newline character in parallel
-    let newline_eq = ascii::DELIMITER_NEW_L.simd_eq(u8x64::load_or_default(remaining));
+    let newline_eq = ascii::DELIMITER_NEW_L.simd_eq(against);
     if let Some(new_l_pos) = newline_eq.first_set() {
         new_l_pos
     } else {
@@ -274,7 +298,7 @@ fn next_newline(mmap: &[u8], at: usize) -> usize {
         // We know line is at most 106 bytes (100 chars + semicolon + 5 digits), but we can only search 64 bytes
         // So the search may have to fall back to memchr if newline is beyond first 64 bytes
         // We know there must be a newline, so rest[64..] must be non-empty
-        let rest_remaining = &remaining[64..];
+        let rest_remaining = unsafe { remaining.get_unchecked(layout::CACHE_LINE_SIZE..) }; // SAFETY: slow path means newline is more than 64 bytes
         // SAFETY: rest_remaining is valid for at least rest_remaining.len() bytes
         let next_newline = unsafe {
             libc::memchr(
@@ -290,7 +314,7 @@ fn next_newline(mmap: &[u8], at: usize) -> usize {
         // SAFETY: memchr always returns pointers in rest_remaining, which are valid
         let len =
             unsafe { (next_newline as *const u8).offset_from(rest_remaining.as_ptr()) } as usize;
-        64 + len
+        layout::CACHE_LINE_SIZE + len
     }
 }
 
