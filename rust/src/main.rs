@@ -3,6 +3,7 @@
 #![feature(hasher_prefixfree_extras)]
 
 use crate::hasher::DumbHasherBuilder;
+use crate::station::StationStats;
 use std::collections::btree_map::Entry;
 use std::sync::mpsc;
 use std::{
@@ -17,6 +18,7 @@ use std::{
 mod tests;
 
 mod hasher;
+mod station;
 
 mod ascii {
     use super::*;
@@ -88,11 +90,7 @@ fn main() {
                         none.insert(v);
                     }
                     Entry::Occupied(some) => {
-                        let stat = some.into_mut();
-                        stat.0 = stat.0.min(v.0);
-                        stat.1 += v.1;
-                        stat.2 += v.2;
-                        stat.3 = stat.3.max(v.3);
+                        some.into_mut().merge(&v);
                     }
                 }
             }
@@ -122,7 +120,7 @@ fn main() {
 /// # Safety
 /// Uses `libc::memchr` on memory-mapped data. The pointers passed to
 /// `memchr` are guaranteed to be valid for the provided length.
-fn process_file(mmap: &[u8]) -> HashMap<Vec<u8>, (i16, i64, usize, i16), DumbHasherBuilder> {
+fn process_file(mmap: &[u8]) -> HashMap<Vec<u8>, StationStats, DumbHasherBuilder> {
     //note: README promised 413 weather stations; 1000 gives headroom without over-allocating
     // Why 1000? The dataset has exactly 413 unique station names. Pre-allocating for 100,000
     // caused massive over-allocation, leading to:
@@ -387,24 +385,24 @@ fn split_semi(line: &[u8]) -> (&[u8], &[u8]) {
 /// Processes a single line and updates the stats map.
 fn process_line(
     line: (&[u8], &[u8]),
-    stats: &mut HashMap<Vec<u8>, (i16, i64, usize, i16), DumbHasherBuilder>,
+    stats: &mut HashMap<Vec<u8>, StationStats, DumbHasherBuilder>,
 ) {
     let (station, temperature) = line; // avoid utf-8 parsing except for temperature
     let temperature = parse_temperature(temperature);
 
     // Get or insert default value for the station
-    let entry = match stats.get_mut(station) {
-        Some(existing_stats) => existing_stats,
-        None => stats
-            .entry(station.to_vec())
-            .or_insert((i16::MAX, 0, 0usize, i16::MIN)),
+    match stats.get_mut(station) {
+        Some(existing_stats) => {
+            // Update the min, sum, count, and max values for the station
+            existing_stats.update(temperature);
+        }
+        None => {
+            stats
+                .entry(station.to_vec())
+                // .or_insert((i16::MAX, 0, 0usize, i16::MIN)),
+                .or_insert(StationStats::new(temperature));
+        }
     };
-
-    // Update the min, sum, count, and max values for the station
-    entry.0 = entry.0.min(temperature); // min
-    entry.1 += i64::from(temperature); // running sum
-    entry.2 += 1; // count
-    entry.3 = entry.3.max(temperature); // max
 }
 
 /// Parses a temperature string from a byte slice into an `i16` integer.
@@ -502,7 +500,7 @@ fn parse_temperature(temperature: &[u8]) -> i16 {
 }
 
 /// Formats the statistics into the required output format.
-fn format_output(stats: BTreeMap<String, (i16, i64, usize, i16)>) -> String {
+fn format_output(stats: BTreeMap<String, StationStats>) -> String {
     // We can;
     // a) sort all the keys,
     // b) move them into BTreeMap
@@ -516,13 +514,13 @@ fn format_output(stats: BTreeMap<String, (i16, i64, usize, i16)>) -> String {
     );
     let mut stats = stats.iter().peekable();
 
-    while let Some((station, (min, sum, count, max))) = stats.next() {
+    while let Some((station, station_stat)) = stats.next() {
         output.push_str(&format!(
             "{station}={min:.1}/{mean:.1}/{max:.1}",
             station = station,
-            min = (*min as f64) / 10_f64,
-            mean = (*sum as f64) / 10_f64 / (*count as f64),
-            max = (*max as f64) / 10_f64
+            min = (station_stat.min as f64) / 10_f64,
+            mean = (station_stat.sum as f64) / 10_f64 / (station_stat.count as f64),
+            max = (station_stat.max as f64) / 10_f64
         ));
 
         // Add comma separator if there are more items to come
