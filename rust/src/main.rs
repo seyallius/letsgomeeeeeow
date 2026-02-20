@@ -58,7 +58,7 @@ fn main() {
         let mmap = mmap_file(&file);
         let mmap_len = mmap.len();
         let threads_n = unsafe { thread::available_parallelism().unwrap_unchecked() }; // SAFETY: c'mon, rust can get the number of cores without error right?
-        let (tx, rx) = mpsc::sync_channel(threads_n.get());
+        let (orig_tx, rx) = mpsc::sync_channel(threads_n.get());
         let chunk_size = mmap_len / threads_n; // Rough target size per thread, in BYTES, not lines.
         let mut at = 0; // Current byte offset into the mmap buffer.
         for _ in 0..threads_n.get() {
@@ -73,12 +73,13 @@ fn main() {
             let mmap = &mmap[start..end]; // Each thread gets a full-line-aligned slice.
             at = end; // Advance cursor; next chunk starts here.
 
-            let tx = tx.clone();
+            let clone_tx = orig_tx.clone();
             scope.spawn(move || {
-                tx.send(process_file(mmap)).unwrap();
+                clone_tx.send(process_file(mmap)).unwrap();
             });
         }
 
+        drop(orig_tx);
         for chunk_stat in rx {
             for (k, v) in chunk_stat {
                 // SAFETY: 1BRC README.md promised valid utf-8 string characters
