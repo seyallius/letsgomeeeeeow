@@ -3,12 +3,14 @@
 #![feature(hasher_prefixfree_extras)]
 
 use crate::hasher::DumbHasherBuilder;
+use std::collections::btree_map::Entry;
+use std::sync::mpsc;
 use std::{
     collections::{BTreeMap, HashMap},
     fs::File,
     os::fd::AsRawFd,
     simd::{cmp::SimdPartialEq, u8x64},
-    {env, io, os, ptr, slice},
+    thread, {env, io, os, ptr, slice},
 };
 
 #[cfg(test)]
@@ -46,7 +48,55 @@ fn main() {
     } else {
         DEFAULT_FILE_PATH
     };
-    let stats = process_file(file_path);
+    let file =
+        File::open(file_path).unwrap_or_else(|_| panic!("Could not open {} file", file_path));
+
+    let mut stats = BTreeMap::new();
+    thread::scope(|scope| {
+        //note: We know we're going to read the whole file, so buffered reading isn't optimal.
+        // Memory mapping tells the kernel to make the file accessible as memory.
+        let mmap = mmap_file(&file);
+        let mmap_len = mmap.len();
+        let threads_n = unsafe { thread::available_parallelism().unwrap_unchecked() }; // SAFETY: c'mon, rust can get the number of cores without error right?
+        let (tx, rx) = mpsc::sync_channel(threads_n.get());
+        let chunk_size = mmap_len / threads_n; // Rough target size per thread, in BYTES, not lines.
+        let mut at = 0; // Current byte offset into the mmap buffer.
+        for _ in 0..threads_n.get() {
+            let start = at; // This thread starts exactly where the previous one ended.
+            let end = (at + chunk_size).min(mmap.len()); // Tentative end; may cut a line in half.
+            let end = if end == mmap_len {
+                mmap_len // We're at the EOF, last chunk takes the remainder, no need to search for '\n'.
+            } else {
+                let newline_at = next_newline(&mmap[end..], 0); // Scan FORWARD from `end` to find the next '\n'.
+                end + newline_at + 1 // Extend slice so we include the full line INCLUDING '\n'.
+            };
+            let mmap = &mmap[start..end]; // Each thread gets a full-line-aligned slice.
+            at = end; // Advance cursor; next chunk starts here.
+
+            let tx = tx.clone();
+            scope.spawn(move || {
+                tx.send(process_file(mmap)).unwrap();
+            });
+        }
+
+        for chunk_stat in rx {
+            for (k, v) in chunk_stat {
+                // SAFETY: 1BRC README.md promised valid utf-8 string characters
+                match stats.entry(unsafe { String::from_utf8_unchecked(k.to_vec()) }) {
+                    Entry::Vacant(none) => {
+                        none.insert(v);
+                    }
+                    Entry::Occupied(some) => {
+                        let stat = some.into_mut();
+                        stat.0 = stat.0.min(v.0);
+                        stat.1 += v.1;
+                        stat.2 += v.2;
+                        stat.3 = stat.3.max(v.3);
+                    }
+                }
+            }
+        }
+    });
     let output = format_output(stats);
     println!("{output}");
     println!();
@@ -71,10 +121,7 @@ fn main() {
 /// # Safety
 /// Uses `libc::memchr` on memory-mapped data. The pointers passed to
 /// `memchr` are guaranteed to be valid for the provided length.
-fn process_file(file_path: &str) -> HashMap<Vec<u8>, (i16, i64, usize, i16), DumbHasherBuilder> {
-    let file =
-        File::open(file_path).unwrap_or_else(|_| panic!("Could not open {} file", file_path));
-
+fn process_file(mmap: &[u8]) -> HashMap<Vec<u8>, (i16, i64, usize, i16), DumbHasherBuilder> {
     //note: README promised 413 weather stations; 1000 gives headroom without over-allocating
     // Why 1000? The dataset has exactly 413 unique station names. Pre-allocating for 100,000
     // caused massive over-allocation, leading to:
@@ -83,14 +130,8 @@ fn process_file(file_path: &str) -> HashMap<Vec<u8>, (i16, i64, usize, i16), Dum
     // - Poorer CPU cache utilization
     // 1000 gives us ~2.4x headroom (enough to avoid reallocation) while keeping the table dense.
     const MAX_STATION_CAPACITY: usize = 1_000;
-    let mut stats = HashMap::<Vec<u8>, (i16, i64, usize, i16), _>::with_capacity_and_hasher(
-        MAX_STATION_CAPACITY,
-        hasher::DumbHasherBuilder,
-    );
+    let mut stats = HashMap::with_capacity_and_hasher(MAX_STATION_CAPACITY, DumbHasherBuilder);
     let mut at = 0;
-    //note: We know we're going to read the whole file, so buffered reading isn't optimal.
-    // Memory mapping tells the kernel to make the file accessible as memory.
-    let mmap = mmap_file(&file);
 
     //note: Changed from loop with next_line to while loop with next_newline
     // This allows us to use SIMD for newline detection instead of just memchr
@@ -460,7 +501,7 @@ fn parse_temperature(temperature: &[u8]) -> i16 {
 }
 
 /// Formats the statistics into the required output format.
-fn format_output(stats: HashMap<Vec<u8>, (i16, i64, usize, i16), DumbHasherBuilder>) -> String {
+fn format_output(stats: BTreeMap<String, (i16, i64, usize, i16)>) -> String {
     // We can;
     // a) sort all the keys,
     // b) move them into BTreeMap
@@ -470,7 +511,7 @@ fn format_output(stats: HashMap<Vec<u8>, (i16, i64, usize, i16), DumbHasherBuild
         stats
             .into_iter()
             // SAFETY: 1BRC README.md promised valid utf-8 string characters
-            .map(|(k, v)| (unsafe { String::from_utf8_unchecked(k) }, v)),
+            .map(|(k, v)| (unsafe { String::from_utf8_unchecked(Vec::from(k)) }, v)),
     );
     let mut stats = stats.iter().peekable();
 
